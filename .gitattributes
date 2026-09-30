@@ -1,0 +1,4 @@
+# VBA-модули: в репозитории LF, при checkout CRLF (как ожидает редактор VBA)
+*.bas text eol=crlf
+*.cls text eol=crlf
+*.frm text eol=crlf
