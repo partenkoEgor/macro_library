@@ -1010,12 +1010,10 @@ Private Function IsNeededGeo( _
             "bolivia", _
             "guatemala", _
             "honduras", _
-            "dominican republic", _
             "iran", _
             "canada", _
             "nicaragua", _
             "panama", _
-            "papua new guinea", _
             "paraguay", _
             "taiwan", _
             "kyrgyzstan", _

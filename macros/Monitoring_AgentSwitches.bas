@@ -410,7 +410,6 @@ Private Function BuildTargets() As Collection
     targets.Add Array("MAR 1-3", "Боливия", "webDefault + bo.1xbet.com", "MAR", "Bolivia")
     targets.Add Array("MAR 1-3", "Гватемала", "webDefault", "MAR", "Guatemala")
     targets.Add Array("MAR 1-3", "Гондурас", "webDefault", "MAR", "Honduras")
-    targets.Add Array("MAR 1-3", "Коста-Рика", "webDefault", "MAR", "Costa Rica")
     targets.Add Array("MAR 1-3", "Марокко", "webDefault", "MAR", "Morocco")
     targets.Add Array("MAR 1-3", "Никарагуа", "webDefault", "MAR", "Nicaragua")
     targets.Add Array("MAR 1-3", "ОАЭ", "webDefault", "MAR", "United Arab Emirates")
@@ -428,7 +427,6 @@ Private Function BuildTargets() As Collection
     targets.Add Array("MRU", "Мавритания", "webDefault", "MRU", "Mauritania")
     targets.Add Array("ALG 1-2", "Алжир", "webDefault", "ALG", "Algeria")
 
-    targets.Add Array("MT2-KZN", "Гаити", "webDefault", "MT2-KZN", "Haiti")
     targets.Add Array("MT2-KZN", "Катар", "webDefault", "MT2-KZN", "Qatar")
     targets.Add Array("MT2-KZN", "Кувейт", "webDefault", "MT2-KZN", "Kuwait")
     targets.Add Array("MT2-KZN", "Ливан", "webDefault", "MT2-KZN", "Lebanon")
@@ -440,9 +438,7 @@ Private Function BuildTargets() As Collection
     targets.Add Array("MT3-BG", "Афганистан", "webDefault", "MT3-BG", "Afghanistan")
     targets.Add Array("MT3-BG", "Ирак", "webDefault", "MT3-BG", "Iraq")
     targets.Add Array("MT3-BG", "Йемен", "webDefault", "MT3-BG", "Yemen")
-    targets.Add Array("MT3-BG", "Папуа Новая Гвинея", "webDefault", "MT3-BG", "Papua New Guinea")
 
-    targets.Add Array("MT5-BG", "Доминиканская республика", "webDefault", "MT5-BG", "Dominican Republic")
     targets.Add Array("MT5-BG", "Канада", "webDefault", "MT5-BG", "Canada")
     targets.Add Array("MT5-BG", "Кыргызстан", "webDefault", "MT5-BG", "Kyrgyzstan")
     targets.Add Array("MT5-BG", "Тайвань", "webDefault", "MT5-BG", "Taiwan")

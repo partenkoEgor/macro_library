@@ -104,11 +104,11 @@ Private Sub BuildReport(ByVal srcWs As Worksheet, _
     Select Case reportMode
 
         Case "API"
-            countryList = Array("Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", "Haiti", _
-                                "Guatemala", "Honduras", "Djibouti", "Dominican Republic", "Egypt", "Jordan", "Iraq", _
+            countryList = Array("Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", _
+                                "Guatemala", "Honduras", "Djibouti", "Egypt", "Jordan", "Iraq", _
                                 "Iran", "Yemen", "Canada", "Qatar", "Kuwait", "Kyrgyzstan", "Lebanon", "Libya", _
                                 "Mauritania", "Morocco", "Nicaragua", "United Arab Emirates", "Oman", "Palestine", _
-                                "Panama", "Papua New Guinea", "Paraguay", "Saudi Arabia", "Syria", "Somalia", _
+                                "Panama", "Paraguay", "Saudi Arabia", "Syria", "Somalia", _
                                 "Sudan", "Taiwan", "Tunisia", "Turkey", "South Sudan", "Jamaica")
 
             refList = Array("webdefault", "1xbet22.com", "melbet", "1xir.com", "1xgames", _
@@ -117,13 +117,13 @@ Private Sub BuildReport(ByVal srcWs As Worksheet, _
                             "in.1xbet.com", "rolsbet", "1xbet.latam", "vippari")
 
         Case "BTM"
-            ' Papua New Guinea и Paraguay остаются в выводе как технические
-            ' позиции, чтобы не сдвигать строки в таблице за август.
-            countryList = Array("Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", "Haiti", _
-                                "Guatemala", "Honduras", "Djibouti", "Dominican Republic", "Egypt", "Jordan", "Iraq", _
+            ' Paraguay остаётся в выводе как техническая позиция, чтобы не
+            ' сдвигать строки в таблице.
+            countryList = Array("Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", _
+                                "Guatemala", "Honduras", "Djibouti", "Egypt", "Jordan", "Iraq", _
                                 "Iran", "Yemen", "Canada", "Qatar", "Kuwait", "Kyrgyzstan", "Lebanon", "Libya", _
                                 "Mauritania", "Morocco", "Nicaragua", "United Arab Emirates", "Oman", "Palestine", _
-                                "Panama", "Papua New Guinea", "Paraguay", "Saudi Arabia", "Syria", "Somalia", _
+                                "Panama", "Paraguay", "Saudi Arabia", "Syria", "Somalia", _
                                 "Taiwan", "Tunisia", "Turkey", "South Sudan")
 
             refList = Array("webdefault", "1xbet22.com", "melbet", "1xir.com", "1xgames", _
@@ -140,7 +140,7 @@ Private Sub BuildReport(ByVal srcWs As Worksheet, _
 
         Case "SMP"
             countryList = Array("Egypt", "Mauritania", "Sudan", _
-                                "Dominican Republic", "Honduras", "Nicaragua", "South Sudan", "Paraguay", "Qatar", "United Arab Emirates", "Canada", "Panama", "Guatemala")
+                                "Honduras", "Nicaragua", "South Sudan", "Paraguay", "Qatar", "United Arab Emirates", "Canada", "Panama", "Guatemala")
 
             refList = Array("webdefault", "1xbet22.com", "melbet", "1xir.com", "1xgames", _
                             "bo.1xbet.com", "1xbet.tn", "1xbet.et", "bizbet", "1xcasino", _
@@ -210,14 +210,14 @@ Private Sub BuildReport(ByVal srcWs As Worksheet, _
         vCountry = Trim(CStr(srcWs.Cells(i, countryCol).Value))
         vRef = LCase(Trim(CStr(srcWs.Cells(i, referalCol).Value)))
 
-        ' Блок Papua New Guinea остаётся в отчёте для сохранения структуры,
-        ' но строки этого GEO полностью исключаются из всех подсчётов.
-        If LCase(vCountry) = "papua new guinea" Then
+        ' Haiti, Dominican Republic, Costa Rica и Papua New Guinea больше не
+        ' относятся к нам: строки этих GEO исключаются из всех подсчётов.
+        If IsRemovedGeo(vCountry) Then
             GoTo NextRow
         End If
 
         ' Paraguay перешёл в SMP. В BT M строка сохраняется
-        ' только для совместимости с августовской таблицей.
+        ' только для совместимости со структурой таблицы.
         If UCase(reportMode) = "BTM" And LCase(vCountry) = "paraguay" Then
             GoTo NextRow
         End If
@@ -447,7 +447,7 @@ Private Sub FormatReportSheet(ByVal ws As Worksheet, _
     If UCase(reportMode) = "SMP" Then
         ' В SMP между всеми GEO сохраняется пустая строка. Берём
         ' фактическую последнюю строку, чтобы кнопка копировала
-        ' диапазон F3:F27 (13 стран, включая Катар, ОАЭ, Канаду, Панаму и Гватемалу).
+        ' диапазон F3:F25 (12 стран, включая Катар, ОАЭ, Канаду, Панаму и Гватемалу).
         geoLastRow = ws.Cells(ws.Rows.Count, geoLabelCol + 1).End(xlUp).Row
     Else
         geoLastRow = 2 + (UBound(countryList) - LBound(countryList) + 1) * geoStep
@@ -683,8 +683,8 @@ Private Sub AddColumnCopyButtons(ByVal ws As Worksheet, _
     If refStep > 2 Then refCopyFirstRow = 4
 
     ' В PSP последняя строка является техническим пустым отступом.
-    ' В SMP geoLastRow указывает на последнюю страну (Гватемала, строка 27),
-    ' диапазон F3:F27 сохраняет пустые строки между всеми GEO.
+    ' В SMP geoLastRow указывает на последнюю страну (Гватемала, строка 25),
+    ' диапазон F3:F25 сохраняет пустые строки между всеми GEO.
     If geoStep = 2 And UCase(reportMode) <> "SMP" Then geoCopyLastRow = geoCopyLastRow - 1
     If refStep = 2 Then refCopyLastRow = refCopyLastRow - 1
 
@@ -841,6 +841,19 @@ Private Function GetLastDataRow(ByVal ws As Worksheet, ByVal keyCols As Variant)
 
     If maxRow < 1 Then maxRow = 1
     GetLastDataRow = maxRow
+
+End Function
+
+
+' GEO, которые больше не относятся к нам.
+Private Function IsRemovedGeo(ByVal countryName As String) As Boolean
+
+    Select Case LCase(Trim(countryName))
+        Case "haiti", "dominican republic", "costa rica", "papua new guinea"
+            IsRemovedGeo = True
+        Case Else
+            IsRemovedGeo = False
+    End Select
 
 End Function
 
@@ -1034,8 +1047,6 @@ Private Function GetSmpCountryDisplayName(ByVal countryName As String) As String
             GetSmpCountryDisplayName = "Мавритания"
         Case "sudan"
             GetSmpCountryDisplayName = "Судан"
-        Case "dominican republic"
-            GetSmpCountryDisplayName = "Доминиканская Республика"
         Case "honduras"
             GetSmpCountryDisplayName = "Гондурас"
         Case "nicaragua"

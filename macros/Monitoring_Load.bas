@@ -2,7 +2,7 @@ Option Explicit
 
 ' VERSION: 2026-09-27 FINAL v3 - Monitoring_Нагрузка
 ' API Team B уточнён по Confluence (GEO/Referal/Agent/Status); Turkey: vippari + Awaiting PS; PSP без Mena Leads;
-' SMP GEO унифицированы (13); все временные пороги Nч+ считаются как >= N; GEO-блоки Fraud удалены;
+' SMP GEO унифицированы (12); все временные пороги Nч+ считаются как >= N; GEO-блоки Fraud удалены;
 ' GEO-список на листе L1 скрыт из результата, внутренний GEO-фильтр сохранён.
 
 ' ============================================================
@@ -1729,8 +1729,7 @@ End Function
 ' ============================================================
 ' БЛОК №4: BT M / SMP M (порт Общий_мониторинг_BT_M_SMP.txt)
 ' Логика построчного прохода перенесена дословно (статусы, гео-списки,
-' рефералы, часовые пороги, исключение melbet вне Турции, исключение
-' Papua New Guinea/Paraguay из активных BT M гео). Единственное отличие
+' рефералы, часовые пороги, исключение melbet вне Турции). Единственное отличие
 ' от оригинала: раньше макрос сам строил вырезку из "Report", теперь
 ' читает из уже готового общего листа "Фильтрация".
 ' Результат раскладывается по четырём листам вместо одного:
@@ -1880,9 +1879,9 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
     Dim cProcTime As Long, cFrom As Long, cStatus As Long, cCountry As Long, cDept As Long
     Dim cAgent As Long, cAgentId As Long, cTicketType As Long, cReferal As Long, cSubagent As Long, cTopic As Long
 
-    L2B_countryEn = Array("Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", "Haiti", "Guatemala", "Honduras", "Djibouti", "Dominican Republic", "Egypt", "Jordan", "Iraq", "Iran", "Yemen", "Canada", "Qatar", "Kuwait", "Kyrgyzstan", "Lebanon", "Libya", "Mauritania", "Morocco", "Nicaragua", "United Arab Emirates", "Oman", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Saudi Arabia", "Syria", "Somalia", "Sudan", "Taiwan", "Tunisia", "Turkey", "South Sudan")
+    L2B_countryEn = Array("Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", "Guatemala", "Honduras", "Djibouti", "Egypt", "Jordan", "Iraq", "Iran", "Yemen", "Canada", "Qatar", "Kuwait", "Kyrgyzstan", "Lebanon", "Libya", "Mauritania", "Morocco", "Nicaragua", "United Arab Emirates", "Oman", "Palestine", "Panama", "Paraguay", "Saudi Arabia", "Syria", "Somalia", "Taiwan", "Tunisia", "Turkey", "South Sudan")
 
-    L2B_countryRu = Array("Азербайджан", "Алжир", "Афганистан", "Бахрейн", "Боливия", "Гаити", "Гватемала", "Гондурас", "Джибути", "Доминиканская Республика", "Египет", "Иордания", "Ирак", "Иран", "Йемен", "Канада", "Катар", "Кувейт", "Кыргызстан", "Ливан", "Ливия", "Мавритания", "Марокко", "Никарагуа", "ОАЭ", "Оман", "Палестина", "Панама", "Папуа - Новая Гвинея", "Парагвай", "Саудовская Аравия", "Сирия", "Сомали", "Судан", "Тайвань", "Тунис", "Турция", "Южный Судан")
+    L2B_countryRu = Array("Азербайджан", "Алжир", "Афганистан", "Бахрейн", "Боливия", "Гватемала", "Гондурас", "Джибути", "Египет", "Иордания", "Ирак", "Иран", "Йемен", "Канада", "Катар", "Кувейт", "Кыргызстан", "Ливан", "Ливия", "Мавритания", "Марокко", "Никарагуа", "ОАЭ", "Оман", "Палестина", "Панама", "Парагвай", "Саудовская Аравия", "Сирия", "Сомали", "Тайвань", "Тунис", "Турция", "Южный Судан")
 
     ' Единый набор SMP GEO. Все SMP-блоки используют один и тот же список,
     ' чтобы GEO, переведённые с BT M на SMP, не терялись в отдельных расчётах.
@@ -1915,12 +1914,9 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
     For iC = LBound(L2B_countryEn) To UBound(L2B_countryEn)
         L2B_geoTotalBT.Add L2B_countryEn(iC), 0
         L2B_geoOver24BT.Add L2B_countryEn(iC), 0
-        ' Papua New Guinea остаётся технической строкой без подсчёта.
-        ' Остальные GEO, включая перешедшие на SMP, продолжают считаться и в BT M,
+        ' Все GEO из списка, включая перешедшие на SMP, считаются и в BT M,
         ' если сам тикет имеет Ticket type = BT M.
-        If L2_NormalizeText(L2B_countryEn(iC)) <> L2_NormalizeText("Papua New Guinea") Then
-            btActiveCountries.Add L2B_countryEn(iC), True
-        End If
+        btActiveCountries.Add L2B_countryEn(iC), True
     Next iC
 
     For iC = LBound(L2B_smpCountryEn) To UBound(L2B_smpCountryEn)
@@ -2197,7 +2193,7 @@ End Function
 Private Function L2_SmpGeoListEn() As Variant
 
     L2_SmpGeoListEn = Array( _
-        "Sudan", "Egypt", "Mauritania", "Dominican Republic", _
+        "Sudan", "Egypt", "Mauritania", _
         "Honduras", "Nicaragua", "South Sudan", "Paraguay", _
         "Qatar", "United Arab Emirates", "Panama", "Canada", "Guatemala" _
     )
@@ -2207,7 +2203,7 @@ End Function
 Private Function L2_SmpGeoListRu() As Variant
 
     L2_SmpGeoListRu = Array( _
-        "Судан", "Египет", "Мавритания", "Доминиканская Республика", _
+        "Судан", "Египет", "Мавритания", _
         "Гондурас", "Никарагуа", "Южный Судан", "Парагвай", _
         "Катар", "ОАЭ", "Панама", "Канада", "Гватемала" _
     )
@@ -2804,7 +2800,7 @@ End Sub
 ' БЛОК №5 (новый): BT M, статусы L2/L1, отдельный список гео.
 ' Источник: настройки пресета №5 в тех-листе Confluence.
 ' Департамент Mena 1x / Mena Leads 1x, Агент BankTransferAgent #279,
-' 7 конкретных статусов, 16 гео. Пишет счётчики по статусу и по гео
+' 7 конкретных статусов, 14 гео. Пишет счётчики по статусу и по гео
 ' в "Нагрузка L2".
 ' ============================================================
 
@@ -2840,7 +2836,7 @@ Private Sub L2_Block_BTM_L2L1(ByVal filteredWs As Worksheet, ByVal ws As Workshe
         "File does not match ticket (M) - 255" _
     )
 
-    countryList = Array("Azerbaijan", "Afghanistan", "Bolivia", "Guatemala", "Honduras", "Dominican Republic", "Iraq", "Iran", "Canada", "Nicaragua", "Panama", "Papua New Guinea", "Paraguay", "Taiwan", "Kyrgyzstan", "Jamaica")
+    countryList = Array("Azerbaijan", "Afghanistan", "Bolivia", "Guatemala", "Honduras", "Iraq", "Iran", "Canada", "Nicaragua", "Panama", "Paraguay", "Taiwan", "Kyrgyzstan", "Jamaica")
 
     ' Пресет №05 выставляет ещё список рефералов и депозитные темы.
     ' Рефералы сверяются по ID через L2_IsPresetReferal.
@@ -2935,18 +2931,18 @@ Private Function L2_L5_NormalizeStatus(ByVal txt As String) As String
     End If
 
 End Function
-' 40 ГЕО, которые выставляются в пресете №09.
+' 36 ГЕО, которые выставляются в пресете №09.
 ' Исходный Зависшие_по_Гео получал выгрузку уже отобранной по этому списку,
 ' поэтому в блок "Не наши гео/рефералы" попадали только комбинации внутри
 ' него. На общей выгрузке отбор повторяем в коде.
 Private Function L2_PresetGeo() As Variant
 
     L2_PresetGeo = Array( _
-        "Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", "Haiti", _
-        "Guatemala", "Honduras", "Djibouti", "Dominican Republic", "Egypt", _
-        "Jordan", "Iraq", "Iran", "Yemen", "Canada", "Qatar", "Costa Rica", _
+        "Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", _
+        "Guatemala", "Honduras", "Djibouti", "Egypt", _
+        "Jordan", "Iraq", "Iran", "Yemen", "Canada", "Qatar", _
         "Kuwait", "Lebanon", "Libya", "Mauritania", "Morocco", "Nicaragua", _
-        "United Arab Emirates", "Oman", "Panama", "Papua New Guinea", _
+        "United Arab Emirates", "Oman", "Panama", _
         "Paraguay", "Saudi Arabia", "Syria", "Somalia", "Sudan", "Taiwan", _
         "Tunisia", "Turkey", "Jamaica", "Kyrgyzstan", "Palestine", "South Sudan")
 
@@ -3178,7 +3174,7 @@ End Function
 
 
 ' ============================================================
-' БЛОК №6: SMP M, конкретные статусы, единые 13 GEO.
+' БЛОК №6: SMP M, конкретные статусы, единые 12 GEO.
 ' Источник: настройки пресета №6 в тех-листе. Теперь выводится вертикальным
 ' блоком на "Нагрузка L2"; из "Зависшие тикеты" этот блок убран.
 ' ============================================================
@@ -3194,7 +3190,7 @@ Private Sub L2_Block_SMP_Specific(ByVal filteredWs As Worksheet, ByVal ws As Wor
 
     statusKeys = Array("Received", "Received (Fraud)", "Approved", "Create new transaction", "Credited to another account", "Revision needed", "In progress")
     displayLabels = statusKeys
-    ' Единый набор из 13 SMP GEO.
+    ' Единый набор из 12 SMP GEO.
     countryList = L2_SmpGeoListEn()
 
     Set statDict = L2_NewDictionary()
@@ -3273,7 +3269,7 @@ End Function
 ' Добавлены явные фильтры Ticket type = "BT M", Agent ID = "279" и
 ' строгий Department (только Mena 1x / Mena Leads 1x, без Buffer) -
 ' в оригинале их обеспечивал сам пресет в тикет-системе.
-' Статус-нормализация, списки статусов и 23 гео перенесены дословно.
+' Статус-нормализация, списки статусов и 22 гео перенесены дословно.
 ' ============================================================
 
 Private Sub L2_Block_L1(ByVal filteredWs As Worksheet, ByVal ws As Worksheet)
@@ -3281,7 +3277,7 @@ Private Sub L2_Block_L1(ByVal filteredWs As Worksheet, ByVal ws As Worksheet)
     Dim depositList As Variant, payoutList As Variant, countryList As Variant
     depositList = Array("File with higher quality and resolution (M)", "Not received (M)", "Details required for refund (M)", "Request for deposit statement (M)", "Request for screenshot of deposit (M)", "Returned to sender's account (M)", "File doesn't match ticket (M)")
     payoutList = Array("Limit reached on the recipient side (M)", "Recipient details incorrect (M)", "Request statement for payout (M)", "Sent (M)")
-    countryList = Array("Algeria", "Bahrain", "Djibouti", "Egypt", "Haiti", "Iraq", "Jordan", "Kuwait", "Lebanon", "Libya", "Mauritania", "Morocco", "Oman", "Palestine", "Qatar", "Saudi Arabia", "Somalia", "South Sudan", "Syria", "Tunisia", "Turkey", "United Arab Emirates", "Yemen")
+    countryList = Array("Algeria", "Bahrain", "Djibouti", "Egypt", "Iraq", "Jordan", "Kuwait", "Lebanon", "Libya", "Mauritania", "Morocco", "Oman", "Palestine", "Qatar", "Saudi Arabia", "Somalia", "South Sudan", "Syria", "Tunisia", "Turkey", "United Arab Emirates", "Yemen")
 
     Dim dM1xStat As Object, dM1xGeo As Object, dMLeadsStat As Object, dMLeadsGeo As Object
     Set dM1xStat = L2_NewDictionary(): Set dM1xGeo = L2_NewDictionary()
@@ -3755,7 +3751,7 @@ Private Sub L2_Block_GeoApiPsp(ByVal wb As Workbook, ByVal filteredWs As Workshe
         referal = L2_Geo_CleanReferal(L2_CleanText(filteredWs.Cells(r, colReferal).value))
         If colReferalId > 0 Then referalId = L2_CleanText(filteredWs.Cells(r, colReferalId).value) Else referalId = ""
 
-        ' Пресет №09 выгружает 40 ГЕО и 16 рефералов. Раньше этот отбор делала
+        ' Пресет №09 выгружает 36 ГЕО и 16 рефералов. Раньше этот отбор делала
         ' выгрузка, поэтому "Итого" и блок "Не наши гео/рефералы" считались
         ' внутри него. На общей выгрузке повторяем отбор здесь, иначе в отчёт
         ' попадают чужие страны (Россия, Узбекистан и подобные).
@@ -4082,7 +4078,6 @@ Private Sub L2_Geo_FillOurPairs(ByRef dictOurPairs As Object, ByRef dictPairRu A
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Bolivia", "Боливия", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Guatemala", "Гватемала", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Honduras", "Гондурас", "webDefault"
-    L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Costa Rica", "Коста-Рика", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Morocco", "Марокко", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Nicaragua", "Никарагуа", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "United Arab Emirates", "ОАЭ", "webDefault"
@@ -4102,8 +4097,6 @@ Private Sub L2_Geo_FillOurPairs(ByRef dictOurPairs As Object, ByRef dictPairRu A
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "South Sudan", "Южный Судан", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Mauritania", "Мавритания", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Algeria", "Алжир", "webDefault"
-    L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Haiti", "Гаити", "webDefault"
-    L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Haiti", "Гаити", "1xCasino"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Qatar", "Катар", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Qatar", "Катар", "1xCasino"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Kuwait", "Кувейт", "webDefault"
@@ -4120,8 +4113,6 @@ Private Sub L2_Geo_FillOurPairs(ByRef dictOurPairs As Object, ByRef dictPairRu A
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Iraq", "Ирак", "1xCasino"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Yemen", "Йемен", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Yemen", "Йемен", "1xCasino"
-    L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Papua New Guinea", "Папуа Новая Гвинея", "webDefault"
-    L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Dominican Republic", "Доминиканская республика", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Canada", "Канада", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Kyrgyzstan", "Кыргызстан", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Taiwan", "Тайвань", "webDefault"
@@ -4151,8 +4142,6 @@ Private Sub L2_Geo_FillL1Pairs(ByRef dictL1Pairs As Object)
     L2_Geo_AddPairKey dictL1Pairs, "Tunisia", "1xCasino"
     L2_Geo_AddPairKey dictL1Pairs, "Mauritania", "webDefault"
     L2_Geo_AddPairKey dictL1Pairs, "Algeria", "webDefault"
-    L2_Geo_AddPairKey dictL1Pairs, "Haiti", "webDefault"
-    L2_Geo_AddPairKey dictL1Pairs, "Haiti", "1xCasino"
     L2_Geo_AddPairKey dictL1Pairs, "Qatar", "webDefault"
     L2_Geo_AddPairKey dictL1Pairs, "Qatar", "1xCasino"
     L2_Geo_AddPairKey dictL1Pairs, "Kuwait", "webDefault"
@@ -4239,10 +4228,8 @@ Private Function L2_Geo_CountryToRu(ByVal countryEn As String) As String
         Case L2_Geo_Norm("Afghanistan"): L2_Geo_CountryToRu = "Афганистан"
         Case L2_Geo_Norm("Bahrain"): L2_Geo_CountryToRu = "Бахрейн"
         Case L2_Geo_Norm("Bolivia"): L2_Geo_CountryToRu = "Боливия"
-        Case L2_Geo_Norm("Haiti"): L2_Geo_CountryToRu = "Гаити"
         Case L2_Geo_Norm("Guatemala"): L2_Geo_CountryToRu = "Гватемала"
         Case L2_Geo_Norm("Honduras"): L2_Geo_CountryToRu = "Гондурас"
-        Case L2_Geo_Norm("Dominican Republic"): L2_Geo_CountryToRu = "Доминиканская республика"
         Case L2_Geo_Norm("Egypt"): L2_Geo_CountryToRu = "Египет"
         Case L2_Geo_Norm("Jordan"): L2_Geo_CountryToRu = "Иордания"
         Case L2_Geo_Norm("Iraq"): L2_Geo_CountryToRu = "Ирак"
@@ -4251,7 +4238,6 @@ Private Function L2_Geo_CountryToRu(ByVal countryEn As String) As String
         Case L2_Geo_Norm("Canada"): L2_Geo_CountryToRu = "Канада"
         Case L2_Geo_Norm("Qatar"): L2_Geo_CountryToRu = "Катар"
         Case L2_Geo_Norm("Kyrgyzstan"): L2_Geo_CountryToRu = "Кыргызстан"
-        Case L2_Geo_Norm("Costa Rica"): L2_Geo_CountryToRu = "Коста-Рика"
         Case L2_Geo_Norm("Kuwait"): L2_Geo_CountryToRu = "Кувейт"
         Case L2_Geo_Norm("Lebanon"): L2_Geo_CountryToRu = "Ливан"
         Case L2_Geo_Norm("Libya"): L2_Geo_CountryToRu = "Ливия"
@@ -4261,7 +4247,6 @@ Private Function L2_Geo_CountryToRu(ByVal countryEn As String) As String
         Case L2_Geo_Norm("United Arab Emirates"): L2_Geo_CountryToRu = "ОАЭ"
         Case L2_Geo_Norm("Oman"): L2_Geo_CountryToRu = "Оман"
         Case L2_Geo_Norm("Panama"): L2_Geo_CountryToRu = "Панама"
-        Case L2_Geo_Norm("Papua New Guinea"): L2_Geo_CountryToRu = "Папуа Новая Гвинея"
         Case L2_Geo_Norm("Paraguay"): L2_Geo_CountryToRu = "Парагвай"
         Case L2_Geo_Norm("Palestine"): L2_Geo_CountryToRu = "Палестина"
         Case L2_Geo_Norm("Saudi Arabia"): L2_Geo_CountryToRu = "Саудовская Аравия"
