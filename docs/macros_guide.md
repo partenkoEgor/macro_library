@@ -108,8 +108,10 @@
 
 **1) Название.** `Monitoring_Выводы`, мониторинг выводов BT M и SMP M.
 
+> Используйте версию из библиотеки: в ней из геофильтра убраны Dominican Republic и Papua New Guinea (подтверждено 20.10.2026). В рабочей копии, присланной 20.10, они ещё есть, поэтому модуль нужно заменить.
+
 **2) Функция.** Считает выводы Mena 1x и Mena Leads 1x по статусам:
-- **BT M** (тип `BT M`, агент BankTransfer…): 238 Review required, 205 Money not sent, cancel, 175 Adjust payment amount, 185 Limit reached on the recipient side, 191 Recipient details incorrect, 199 Request for payment statement, 203 Sent. Статусы 185 / 191 / 199 / 203 считаются только по нужным странам: Azerbaijan, Afghanistan, Bolivia, Guatemala, Honduras, Iran, Canada, Nicaragua, Panama, Paraguay, Taiwan, Kyrgyzstan, Jamaica. Остальные статусы считаются по всем странам. В присланной версии в этом списке ещё есть Dominican Republic и Papua New Guinea, см. замечание в конце.
+- **BT M** (тип `BT M`, агент BankTransfer…): 238 Review required, 205 Money not sent, cancel, 175 Adjust payment amount, 185 Limit reached on the recipient side, 191 Recipient details incorrect, 199 Request for payment statement, 203 Sent. Статусы 185 / 191 / 199 / 203 считаются только по нужным странам: Azerbaijan, Afghanistan, Bolivia, Guatemala, Honduras, Iran, Canada, Nicaragua, Panama, Paraguay, Taiwan, Kyrgyzstan, Jamaica. Остальные статусы считаются по всем странам.
 - **SMP M** (тип `SMP M`, агент SendMePay): 81 Revision needed, 53 Money not sent, cancel, 38 Adjust the payout amount.
 
 Старые названия статусов тоже распознаются.
@@ -282,6 +284,5 @@
 
 ## Замечания по присланным версиям
 
-1. **`Monitoring_Выводы`: в геофильтре есть Dominican Republic и Papua New Guinea.** 30.09 их убрали из всех списков гео, но в присланной версии они остались. В библиотеке лежит исправленная версия без них. Если эти страны действительно больше не наши, замените свой модуль версией из `macros/Monitoring_Withdrawals.bas`.
-2. **Approved: строки 14–15 листа `Отчёт` никто не заполняет.** `Approved_Фильтр1_v3` (3.1.4) пишет, что их заполнит `Approved_Перенос2_v3`, но в присланной версии 3.1.0 такого кода нет. Скорее всего, есть более новая версия `Перенос2`. Если она у вас есть, пришлите её.
-3. **`Monitoring_Зависшие_72ч` считает время от `Now`**, а `Monitoring_Нагрузка` от максимальной `Processing date` в файле. На одной и той же выгрузке цифры 72h+ у этих макросов могут отличаться.
+1. **Approved: строки 14–15 листа `Отчёт` никто не заполняет.** `Approved_Фильтр1_v3` (3.1.4) пишет, что их заполнит `Approved_Перенос2_v3`, но в присланной версии 3.1.0 такого кода нет. Скорее всего, есть более новая версия `Перенос2`. Если она у вас есть, пришлите её.
+2. **`Monitoring_Зависшие_72ч` считает время от `Now`**, а `Monitoring_Нагрузка` от максимальной `Processing date` в файле. На одной и той же выгрузке цифры 72h+ у этих макросов могут отличаться.
