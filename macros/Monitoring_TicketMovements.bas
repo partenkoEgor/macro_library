@@ -6,14 +6,14 @@ Option Explicit
 '
 ' Учитываются только строки блока "L2". Блок "Не L2" в подсчёт не идёт.
 '
-' Результат - сетка по дням месяца, а не один общий итог: колонка B = день 1,
-' последняя колонка = вчерашний день. Сегодняшний день не считается, его данные
-' в выгрузке ещё не полные. Ширина сетки не фиксирована и не зависит от того,
-' сколько колонок реально есть в выгрузке - она считается от сегодняшней даты
-' (MAX_DAYS = число сегодня минус 1), поэтому автоматически адаптируется под
-' любой день месяца без лишних нулевых колонок.
-' День берётся не по номеру колонки, а по значению в строке 4 исходной выгрузки
-' (DAY_HEADER_ROW), на случай если пивот когда-нибудь пропустит день.
+' Результат - сетка по дням ОТЧЁТНОГО месяца, а не один общий итог.
+' Отчётная дата всегда = вчера (Date - 1). Поэтому:
+'   01.10 -> строится сентябрь по 30.09 включительно;
+'   02.10 -> строится октябрь по 01.10 включительно;
+'   01.11 -> строится октябрь по 31.10 включительно.
+' Сегодняшний день не считается, его данные в выгрузке ещё не полные.
+' Год, месяц и день берутся из строк заголовка исходной выгрузки, поэтому
+' одинаковый номер дня из разных месяцев не смешивается.
 ' Лист каждый раз пересобирается заново из активной выгрузки, поэтому его можно
 ' перезапускать в течение месяца на растущей month-to-date выгрузке.
 '
@@ -26,10 +26,13 @@ Private Const COL_INIT As Long = 2        ' Начальный статус
 Private Const COL_FINAL As Long = 3       ' Конечный статус
 Private Const COL_ROWTYPE As Long = 4     ' "Тикеты или взаимодействия" / "Доля от общего количества..."
 Private Const COL_VALUE_FIRST As Long = 5 ' первая колонка со значениями (по одной на день месяца)
+Private Const YEAR_HEADER_ROW As Long = 2 ' строка с годом
+Private Const MONTH_HEADER_ROW As Long = 3 ' строка с месяцем
 Private Const DAY_HEADER_ROW As Long = 4  ' строка с номерами дней (1, 2, 3...) над колонками значений
 
-' Не Const: считается один раз в начале Sub от текущей даты (сегодня минус 1),
-' дальше используется во всех функциях листа как ширина сетки дней.
+' Параметры отчётного периода. Определяются один раз по вчерашней дате.
+Private REPORT_YEAR As Long
+Private REPORT_MONTH As Long
 Private MAX_DAYS As Long
 
 Sub Monitoring_Перемещение_тикетов()
@@ -40,6 +43,10 @@ Sub Monitoring_Перемещение_тикетов()
     Dim i As Long, c As Long, d As Long
     Dim curInit As String, curFinal As String, curResp As String
     Dim outRow As Long
+    Dim reportDate As Date
+    Dim headerYear As Variant
+    Dim headerMonth As Variant
+    Dim sourceMonth As Long
     Dim dayNum As Variant
     Dim cellVal As Variant
 
@@ -50,8 +57,11 @@ Sub Monitoring_Перемещение_тикетов()
     Set wsSrc = ActiveSheet
     Set dict = CreateObject("Scripting.Dictionary")
 
-    ' Сегодняшний день неполный, считаем по вчерашний включительно.
-    MAX_DAYS = Day(Date) - 1
+    ' Отчётная дата всегда вчера. Это корректно работает и на границе месяца.
+    reportDate = Date - 1
+    REPORT_YEAR = Year(reportDate)
+    REPORT_MONTH = Month(reportDate)
+    MAX_DAYS = Day(reportDate)
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
@@ -100,17 +110,22 @@ Sub Monitoring_Перемещение_тикетов()
 
                 For c = COL_VALUE_FIRST To lastCol
 
+                    headerYear = wsSrc.Cells(YEAR_HEADER_ROW, c).MergeArea.Cells(1, 1).Value
+                    headerMonth = wsSrc.Cells(MONTH_HEADER_ROW, c).MergeArea.Cells(1, 1).Value
                     dayNum = wsSrc.Cells(DAY_HEADER_ROW, c).MergeArea.Cells(1, 1).Value
+                    sourceMonth = MonthHeaderToNumber(headerMonth)
 
-                    If IsNumeric(dayNum) Then
-                        If CLng(dayNum) >= 1 And CLng(dayNum) <= MAX_DAYS Then
+                    If IsNumeric(headerYear) And IsNumeric(dayNum) Then
+                        If CLng(headerYear) = REPORT_YEAR And sourceMonth = REPORT_MONTH Then
+                            If CLng(dayNum) >= 1 And CLng(dayNum) <= MAX_DAYS Then
 
-                            cellVal = wsSrc.Cells(i, c).Value
+                                cellVal = wsSrc.Cells(i, c).Value
 
-                            If IsNumeric(cellVal) Then
-                                AddToDict dict, curInit, curFinal, CLng(dayNum), CLng(cellVal)
+                                If IsNumeric(cellVal) Then
+                                    AddToDict dict, curInit, curFinal, CLng(dayNum), CLng(cellVal)
+                                End If
+
                             End If
-
                         End If
                     End If
 
@@ -449,6 +464,50 @@ Private Function CleanText(ByVal v As Variant) As String
 
 End Function
 
+Private Function MonthHeaderToNumber(ByVal v As Variant) As Long
+
+    Dim s As String
+
+    s = LCase(CleanText(v))
+
+    If IsNumeric(s) Then
+        If CLng(s) >= 1 And CLng(s) <= 12 Then
+            MonthHeaderToNumber = CLng(s)
+            Exit Function
+        End If
+    End If
+
+    Select Case s
+        Case "январь", "января", "january", "jan"
+            MonthHeaderToNumber = 1
+        Case "февраль", "февраля", "february", "feb"
+            MonthHeaderToNumber = 2
+        Case "март", "марта", "march", "mar"
+            MonthHeaderToNumber = 3
+        Case "апрель", "апреля", "april", "apr"
+            MonthHeaderToNumber = 4
+        Case "май", "мая", "may"
+            MonthHeaderToNumber = 5
+        Case "июнь", "июня", "june", "jun"
+            MonthHeaderToNumber = 6
+        Case "июль", "июля", "july", "jul"
+            MonthHeaderToNumber = 7
+        Case "август", "августа", "august", "aug"
+            MonthHeaderToNumber = 8
+        Case "сентябрь", "сентября", "september", "sep", "sept"
+            MonthHeaderToNumber = 9
+        Case "октябрь", "октября", "october", "oct"
+            MonthHeaderToNumber = 10
+        Case "ноябрь", "ноября", "november", "nov"
+            MonthHeaderToNumber = 11
+        Case "декабрь", "декабря", "december", "dec"
+            MonthHeaderToNumber = 12
+        Case Else
+            MonthHeaderToNumber = 0
+    End Select
+
+End Function
+
 Private Function IsTicketRow(ByVal v As Variant) As Boolean
 
     Dim s As String
@@ -546,7 +605,7 @@ Private Sub FormatResult(ByVal ws As Worksheet)
     With ws.Range(ws.Cells(1, 2), ws.Cells(1, MAX_DAYS + 1)).EntireColumn
         .ColumnWidth = 8
         .HorizontalAlignment = xlCenter
-        .NumberFormat = "#,##0"
+        .NumberFormat = "0"
     End With
 
 End Sub

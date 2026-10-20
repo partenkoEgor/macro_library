@@ -1,8 +1,36 @@
 Option Explicit
 
-' VERSION: 2026-09-27 FINAL v3 - Monitoring_Нагрузка
+' VERSION: 2026-10-17 - Monitoring_Нагрузка (согласованное исправление ГЕО)
+' Исправлены Country/Ticket currency; фильтры каждого блока и копирование сохранены.
+' Возвращена Ямайка в ЗТ по ГЕО API без изменения других списков и блоков.
+' ===========================================================================
+' ИНСТРУКЦИЯ ДЛЯ РУЧНОЙ ПРАВКИ: ГЕО И ВАЛЮТЫ
+'
+' 1. В каждом расчёте свой список стран. Не заменяйте его общим списком!
+'    API нагрузка L2:                 L2_PresetGeo (35 стран).
+'    ЗТ по ГЕО API:                  L2_GeoApiCopyCountries (36, включая Ямайку).
+'    BT M общий и BT M по ГЕО:       L2B_countryEn (34 страны).
+'    BT M L2/L1:                    countryList в L2_Block_BTM_L2L1 (14).
+'    Нагрузка L1:                   countryList в L2_Block_L1 (22).
+'    PSP:                           L2_PspGeoListEn (5).
+'    SMP M:                         L2_SmpGeoListEn (13).
+'    Зависшие API/PSP по парам:      L2_Geo_FillOurPairs.
+'    ВНИМАНИЕ: пока Ямайка есть в рабочей таблице ЗТ по ГЕО API,
+'    не убирайте её из L2_GeoApiCopyCountries и L2_Geo_FillOurPairs.
+'    Число строк и порядок копирования должны совпадать с таблицей.
+' 2. Соответствия валют задаются ТОЛЬКО в L2_CountryFromCurrency.
+' 3. L2_WorkCountry сначала проверяет Country по списку ДАННОГО расчёта.
+'    Только если Country не подходит, читает Ticket currency.
+'    Если валюта не даёт страну из того же списка, результат пустой:
+'    тикет в этом расчёте НЕ учитывать.
+' 4. Не добавляйте строк, столбцов и гео в результаты для копирования.
+' 5. Ticket type, статусы, рефералы, агенты и пороги остаются отдельными
+'    обязательными условиями. Смена рабочего ГЕО НЕ меняет Ticket type.
+' ===========================================================================
+
+' Добавлен последний лист неиспользуемых Ticket ID; контроль Сводной и вечернего PSP.
 ' API Team B уточнён по Confluence (GEO/Referal/Agent/Status); Turkey: vippari + Awaiting PS; PSP без Mena Leads;
-' SMP GEO унифицированы (12); все временные пороги Nч+ считаются как >= N; GEO-блоки Fraud удалены;
+' 13.10.2026: Djibouti добавлен в SMP (13 GEO); BT M сохранён; все временные пороги Nч+ считаются как >= N;
 ' GEO-список на листе L1 скрыт из результата, внутренний GEO-фильтр сохранён.
 
 ' ============================================================
@@ -53,6 +81,23 @@ Private L2S_L1Total As Long
 Private L2S_FraudM1Total As Long
 Private L2S_FraudLeadsTotal As Long
 Private L2S_ApiPspStuck24 As Long
+
+' ============================================================
+' КОНТРОЛЬ ПО УНИКАЛЬНЫМ TICKET ID
+' Учитывает реальные выводимые показатели. Сводная дополнительно считает BT M,
+' вечерний отчёт использует категории PSP. Готовые итоги повторно не суммируются.
+' ============================================================
+Private L2C_TicketIdCol As Long
+Private L2C_SourceIds As Object
+Private L2C_UsedIds As Object
+Private L2C_SummaryIds As Object
+Private L2C_EveningIds As Object
+Private L2C_LoadL2Ids As Object
+Private L2C_LoadL1Ids As Object
+Private L2C_FraudIds As Object
+Private L2C_StuckIds As Object
+Private L2C_GeoApiIds As Object
+Private L2C_GeoBtmSmpPspIds As Object
 
 Private L2B_geoTotalBT As Object
 Private L2B_geoOver24BT As Object
@@ -179,9 +224,11 @@ Public Sub Monitoring_Нагрузка()
     L2_DeleteSheet wb, "ЗТ по ГЕО API"
     L2_DeleteSheet wb, "Сводная таблица 12-19"
     L2_DeleteSheet wb, "Лидеры"
+    L2_DeleteSheet wb, "Неиспользуемые тикеты"
 
     Set filteredWs = L2_AddSheetAtEnd(wb, "Фильтрация")
     If Not L2_BuildFilteredSheet(srcWs, filteredWs) Then GoTo SafeExit
+    L2_ControlInit filteredWs
 
     Set eveningWs = L2_AddSheetAtEnd(wb, "Вечерний отчет")
     Set summaryWs = L2_AddSheetAtEnd(wb, "Сводная")
@@ -241,21 +288,24 @@ Public Sub Monitoring_Нагрузка()
     filteredWs.Visible = xlSheetVisible
 
     L2_ArrangeSheets wb
+    L2_ControlWriteUnused wb, filteredWs
 
     loadWs.Activate
 
-    MsgBox "Готово!" & vbCrLf & _
-           "Созданы листы:" & vbCrLf & _
-           "- Фильтрация" & vbCrLf & _
-           "- Вечерний отчет" & vbCrLf & _
-           "- Сводная" & vbCrLf & _
-           "- Нагрузка L2" & vbCrLf & _
-           "- Нагрузка L1" & vbCrLf & _
-           "- Нагрузка Fraud" & vbCrLf & _
-           "- Зависшие тикеты" & vbCrLf & _
-           "- ЗТ по ГЕО BT M,SMP M,PSP" & vbCrLf & _
-           "- ЗТ по ГЕО API", vbInformation
-
+    MsgBox "Готово!" & vbCrLf & vbCrLf & _
+           "Контроль:" & vbCrLf & _
+           "Уникальных Ticket ID: " & L2_ControlCount(L2C_SourceIds) & vbCrLf & _
+           "Использовано хотя бы раз: " & L2_ControlCount(L2C_UsedIds) & vbCrLf & _
+           "Не использовано: " & (L2_ControlCount(L2C_SourceIds) - L2_ControlCount(L2C_UsedIds)) & vbCrLf & vbCrLf & _
+           "По листам:" & vbCrLf & _
+           "Нагрузка L2: " & L2_ControlCount(L2C_LoadL2Ids) & vbCrLf & _
+           "Нагрузка L1: " & L2_ControlCount(L2C_LoadL1Ids) & vbCrLf & _
+           "Нагрузка Fraud: " & L2_ControlCount(L2C_FraudIds) & vbCrLf & _
+           "Зависшие тикеты: " & L2_ControlCount(L2C_StuckIds) & vbCrLf & _
+           "ЗТ по ГЕО API: " & L2_ControlCount(L2C_GeoApiIds) & vbCrLf & _
+           "ЗТ по ГЕО BT M,SMP M,PSP: " & L2_ControlCount(L2C_GeoBtmSmpPspIds) & vbCrLf & _
+           "Сводная BT M: из готовых итогов Нагрузки L2" & vbCrLf & _
+           "Вечерний отчёт (категории PSP): " & L2_ControlCount(L2C_EveningIds), vbInformation
 SafeExit:
     Application.CutCopyMode = False
     If appStateCaptured Then
@@ -320,7 +370,7 @@ Private Function L2_BuildFilteredSheet(ByVal srcWs As Worksheet, ByVal filteredW
     ' проверяются все колонки, которые реально читаются хотя бы одним блоком.
     ' Это предотвращает обращение Cells(row, 0) и ошибку 1004 при неполной выгрузке.
     Dim requiredHeaders As Variant
-    requiredHeaders = Array("Date created", "Processing date", "Processing time", "From", "External Status", "Status", "Country", "Ticket ID", "Topic", "Ticket type", "Department", "Agent", "Agent ID", "Referal", "Subagent", "Type")
+    requiredHeaders = Array("Date created", "Processing date", "Processing time", "From", "External Status", "Status", "Country", "Ticket ID", "Ticket currency", "Topic", "Ticket type", "Department", "Agent", "Agent ID", "Referal", "Subagent", "Type")
 
     For i = LBound(requiredHeaders) To UBound(requiredHeaders)
         If Not headerMap.Exists(L2_NormalizeText(requiredHeaders(i))) Then
@@ -379,9 +429,9 @@ Private Function L2_BuildFilteredSheet(ByVal srcWs As Worksheet, ByVal filteredW
         fromValue = L2_NormalizeText(filterData(r, 4))
 
         Select Case fromValue
-            Case L2_NormalizeText("Through Customer Support")
+            Case L2_NormalizeText("Through Customer Support"), L2_NormalizeText("By Customer Support")
                 filterData(r, 4) = "PS"
-            Case L2_NormalizeText("By yourself")
+            Case L2_NormalizeText("By yourself"), L2_NormalizeText("By customer")
                 filterData(r, 4) = "User"
         End Select
 
@@ -608,6 +658,172 @@ Private Function L2_DictValue(ByVal dict As Object, ByVal key As String) As Long
         L2_DictValue = CLng(dict(key))
     Else
         L2_DictValue = 0
+    End If
+
+End Function
+
+' ============================================================
+' КОНТРОЛЬ РАСЧЁТОВ ПО TICKET ID
+' ============================================================
+Private Sub L2_ControlInit(ByVal filteredWs As Worksheet)
+
+    Dim lastRow As Long, r As Long
+    Dim ticketId As String
+
+    Set L2C_SourceIds = L2_NewDictionary()
+    Set L2C_UsedIds = L2_NewDictionary()
+    Set L2C_SummaryIds = L2_NewDictionary()
+    Set L2C_EveningIds = L2_NewDictionary()
+    Set L2C_LoadL2Ids = L2_NewDictionary()
+    Set L2C_LoadL1Ids = L2_NewDictionary()
+    Set L2C_FraudIds = L2_NewDictionary()
+    Set L2C_StuckIds = L2_NewDictionary()
+    Set L2C_GeoApiIds = L2_NewDictionary()
+    Set L2C_GeoBtmSmpPspIds = L2_NewDictionary()
+
+    L2C_TicketIdCol = L2_GetHeaderCol(filteredWs, "Ticket ID")
+    If L2C_TicketIdCol = 0 Then Exit Sub
+
+    lastRow = L2_GetLastRow(filteredWs)
+
+    For r = 2 To lastRow
+        ticketId = L2_CleanText(filteredWs.Cells(r, L2C_TicketIdCol).value)
+        If ticketId <> "" Then
+            If Not L2C_SourceIds.Exists(ticketId) Then L2C_SourceIds.Add ticketId, True
+        End If
+    Next r
+
+End Sub
+
+Private Sub L2_ControlMarkRow(ByVal filteredWs As Worksheet, ByVal rowIndex As Long, ByVal sheetDict As Object)
+
+    Dim ticketId As String
+
+    If sheetDict Is Nothing Then Exit Sub
+    If L2C_UsedIds Is Nothing Then Exit Sub
+    If L2C_TicketIdCol = 0 Then Exit Sub
+
+    ticketId = L2_CleanText(filteredWs.Cells(rowIndex, L2C_TicketIdCol).value)
+    If ticketId = "" Then Exit Sub
+
+    If Not sheetDict.Exists(ticketId) Then sheetDict.Add ticketId, True
+    If Not L2C_UsedIds.Exists(ticketId) Then L2C_UsedIds.Add ticketId, True
+
+End Sub
+
+
+' Последняя вкладка: только ID, которые не используются ни в одном
+' выводимом показателе. Внутренние невыводимые счётчики не учитываются.
+Private Sub L2_ControlWriteUnused(ByVal wb As Workbook, ByVal filteredWs As Worksheet)
+
+    Dim ws As Worksheet, data As Variant, outputData As Variant
+    Dim summary As Object, seen As Object, rowsToWrite As Collection
+    Dim lastRow As Long, lastCol As Long, r As Long, c As Long, n As Long
+    Dim cType As Long, cCountry As Long, cDept As Long, cStatus As Long, cExternal As Long
+    Dim ticketId As String, key As String, parts As Variant, k As Variant
+    Dim summaryData As Variant, headerRow As Long, outRow As Long
+
+    Set ws = L2_AddSheetAtEnd(wb, "Неиспользуемые тикеты")
+    Set summary = L2_NewDictionary()
+    Set seen = L2_NewDictionary()
+    Set rowsToWrite = New Collection
+    lastRow = L2_GetLastRow(filteredWs)
+    lastCol = filteredWs.Cells(1, filteredWs.Columns.Count).End(xlToLeft).Column
+    data = filteredWs.Range(filteredWs.Cells(1, 1), filteredWs.Cells(lastRow, lastCol)).Value2
+    cType = L2_GetHeaderCol(filteredWs, "Ticket type")
+    cCountry = L2_GetHeaderCol(filteredWs, "Country")
+    cDept = L2_GetHeaderCol(filteredWs, "Department")
+    cStatus = L2_GetHeaderCol(filteredWs, "Status")
+    cExternal = L2_GetHeaderCol(filteredWs, "External Status")
+
+    For r = 2 To lastRow
+        ticketId = L2_CleanText(data(r, L2C_TicketIdCol))
+        If ticketId <> "" Then
+            If Not L2C_UsedIds.Exists(ticketId) And Not seen.Exists(ticketId) Then
+                seen.Add ticketId, True
+                rowsToWrite.Add r
+                key = L2_CleanText(data(r, cType)) & ChrW(30) & _
+                      L2_CleanText(data(r, cCountry)) & ChrW(30) & _
+                      L2_CleanText(data(r, cDept)) & ChrW(30) & _
+                      L2_CleanText(data(r, cStatus)) & ChrW(30) & _
+                      L2_CleanText(data(r, cExternal))
+                L2_IncDictionary summary, key
+            End If
+        End If
+    Next r
+
+    ' Ошибка контроля не должна маскироваться неполным списком.
+    If seen.Count <> L2_ControlCount(L2C_SourceIds) - L2_ControlCount(L2C_UsedIds) Then
+        Err.Raise vbObjectError + 2101, "L2_ControlWriteUnused", "Список неиспользуемых Ticket ID не совпал с контролем."
+    End If
+
+    ws.Range("A1").value = "Неиспользуемые тикеты"
+    ws.Range("A1:F1").Interior.Color = RGB(31, 78, 121)
+    ws.Range("A1:F1").Font.Color = RGB(255, 255, 255)
+    ws.Range("A1:F1").Font.Bold = True
+    ws.Range("A2").value = "Уникальных Ticket ID"
+    ws.Range("B2").value = seen.Count
+    ws.Range("A3").value = "ID не участвует ни в одном выводимом расчёте. Список составлен по листу Фильтрация."
+    ws.Range("A4:F4").value = Array("Ticket type", "Country", "Department", "Status", "External Status", "Количество")
+    ws.Range("A4:F4").Font.Bold = True
+    ws.Range("A4:F4").Interior.Color = RGB(221, 235, 247)
+
+    If summary.Count > 0 Then
+        ReDim summaryData(1 To summary.Count, 1 To 6)
+        outRow = 0
+        For Each k In summary.Keys
+            outRow = outRow + 1
+            parts = Split(CStr(k), ChrW(30))
+            For c = 0 To 4
+                summaryData(outRow, c + 1) = parts(c)
+            Next c
+            summaryData(outRow, 6) = summary(k)
+        Next k
+        ws.Range(ws.Cells(5, 1), ws.Cells(4 + summary.Count, 6)).value = summaryData
+        ws.Range(ws.Cells(5, 6), ws.Cells(4 + summary.Count, 6)).NumberFormat = "0"
+    Else
+        ws.Range("A5").value = "Неиспользуемых Ticket ID нет."
+    End If
+
+    headerRow = 8 + summary.Count
+    ws.Cells(headerRow - 1, 1).value = "Список тикетов (одна строка на Ticket ID)"
+    ws.Cells(headerRow - 1, 1).Font.Bold = True
+    ReDim outputData(1 To rowsToWrite.Count + 1, 1 To lastCol)
+    For c = 1 To lastCol
+        outputData(1, c) = data(1, c)
+    Next c
+    For n = 1 To rowsToWrite.Count
+        r = CLng(rowsToWrite(n))
+        For c = 1 To lastCol
+            outputData(n + 1, c) = data(r, c)
+        Next c
+    Next n
+    With ws.Range(ws.Cells(headerRow, 1), ws.Cells(headerRow + rowsToWrite.Count, lastCol))
+        .value = outputData
+        .AutoFilter
+        .VerticalAlignment = xlTop
+    End With
+    For c = 1 To lastCol
+        ws.Columns(c).ColumnWidth = filteredWs.Columns(c).ColumnWidth
+        If ws.Columns(c).ColumnWidth > 40 Then ws.Columns(c).ColumnWidth = 40
+        ws.Range(ws.Cells(headerRow + 1, c), ws.Cells(headerRow + 1 + rowsToWrite.Count, c)).NumberFormat = filteredWs.Columns(c).NumberFormat
+    Next c
+    ws.Range(ws.Cells(headerRow, 1), ws.Cells(headerRow, lastCol)).Font.Bold = True
+    ws.Range(ws.Cells(headerRow, 1), ws.Cells(headerRow, lastCol)).Interior.Color = RGB(230, 230, 230)
+    ws.Range("A2:B2").Font.Bold = True
+    ws.Range("B2").NumberFormat = "0"
+    ws.Cells.Font.Name = "Calibri"
+    ws.Cells.Font.Size = 11
+    ws.Visible = xlSheetVisible
+
+End Sub
+
+Private Function L2_ControlCount(ByVal dict As Object) As Long
+
+    If dict Is Nothing Then
+        L2_ControlCount = 0
+    Else
+        L2_ControlCount = dict.Count
     End If
 
 End Function
@@ -906,8 +1122,8 @@ End Sub
 
 ' ============================================================
 ' БЛОК №2: API (порт Нагрузка_API.txt)
-' Источник: лист "Фильтрация" (Topic, Country, Referal, External Status,
-' Department, Ticket type). Добавлен явный фильтр Ticket type = "API",
+' Источник: лист "Фильтрация" (Topic, Country, Referal, Status,
+' Department, Ticket type). API-статус читается только из Status. Добавлен явный фильтр Ticket type = "API",
 ' которого не было в оригинале (там его обеспечивал сам пресет).
 ' Пишет на "Нагрузка L2" вертикально: Team B (TR/AZN) и Team A.
 ' Кнопки копируют только согласованные строки значений, без итогов.
@@ -916,8 +1132,8 @@ End Sub
 Private Sub L2_Block_API_Load(ByVal filteredWs As Worksheet, ByVal ws As Worksheet, ByRef rowCursor As Long)
 
     Dim lastRow As Long, i As Long
-    Dim cTopic As Long, cCountry As Long, cReferal As Long, cReferalId As Long, cStatus As Long, cExtStatus As Long
-    Dim cDept As Long, cTicketType As Long, cAgent As Long, cAgentId As Long
+    Dim cTopic As Long, cCountry As Long, cReferal As Long, cReferalId As Long, cStatus As Long
+    Dim cDept As Long, cTicketType As Long, cAgent As Long, cAgentId As Long, cCurrency As Long
     Dim vTop As String, vCountry As String, vStat As String, vRef As String, vRefId As String, vDept As String, vTicketType As String
     Dim vAgent As String, vAgentId As String
     Dim tType As Integer
@@ -932,18 +1148,15 @@ Private Sub L2_Block_API_Load(ByVal filteredWs As Worksheet, ByVal ws As Workshe
     cReferal = L2_GetHeaderCol(filteredWs, "Referal")
     cReferalId = L2_GetHeaderCol(filteredWs, "Referal ID")
 
-    ' Классифицируем по статусу тикета (Status), как и блок PSP.
-    ' External Status - техническое поле: у одного и того же статуса тикета
-    ' там встречаются "Transaction verification", "In progress PS",
-    ' "Individual approval" и т.п. Из-за этого тикеты, например
-    ' "In progress", молча выпадали из подсчёта.
+    ' API классифицируется только по Ticket Status, который в выгрузке
+    ' находится в колонке Status. External Status в API не используется.
     cStatus = L2_GetHeaderCol(filteredWs, "Status")
-    cExtStatus = L2_GetHeaderCol(filteredWs, "External Status")
 
     cDept = L2_GetHeaderCol(filteredWs, "Department")
     cTicketType = L2_GetHeaderCol(filteredWs, "Ticket type")
     cAgent = L2_GetHeaderCol(filteredWs, "Agent")
     cAgentId = L2_GetHeaderCol(filteredWs, "Agent ID")
+    cCurrency = L2_GetHeaderCol(filteredWs, "Ticket currency")
 
     lastRow = L2_GetLastRow(filteredWs)
 
@@ -959,23 +1172,23 @@ Private Sub L2_Block_API_Load(ByVal filteredWs As Worksheet, ByVal ws As Workshe
         If Not L2_IsOurLoadDepartment(vDept) Then GoTo NextRow
 
         vTop = L2_CleanText(filteredWs.Cells(i, cTopic).value)
-        vCountry = L2_CleanText(filteredWs.Cells(i, cCountry).value)
+        ' Для API допускаются только 35 стран из L2_PresetGeo.
+        ' Наша Country -> сразу используем её. Чужая -> проверяем валюту.
+        vCountry = L2_WorkCountry( _
+            L2_CleanText(filteredWs.Cells(i, cCountry).value), _
+            L2_CleanText(filteredWs.Cells(i, cCurrency).value), L2_PresetGeo())
+        If vCountry = "" Then GoTo NextRow
 
         vStat = L2_Api_NormalizeStatus(L2_CleanText(filteredWs.Cells(i, cStatus).value))
-
-        ' Запасной вариант: если статус тикета пуст или незнаком,
-        ' пробуем распознать по техническому External Status.
-        If Not L2_Api_IsKnownStatus(vStat) Then
-            If cExtStatus > 0 Then
-                vStat = L2_Api_NormalizeStatus(L2_CleanText(filteredWs.Cells(i, cExtStatus).value))
-            End If
-        End If
 
         ' В общей выгрузке могут быть статусы других пресетов.
         ' Для API повторяем фильтр исходного API-пресета внутри макроса.
         If Not L2_Api_IsKnownStatus(vStat) Then GoTo NextRow
 
         vRef = L2_CleanText(filteredWs.Cells(i, cReferal).value)
+        ' RolsBet убран из октябрьской ответственности API.
+        If L2_NormalizeText(L2_Geo_CleanReferal(vRef)) = L2_NormalizeText("rolsbet") Then GoTo NextRow
+
         If cReferalId > 0 Then vRefId = L2_CleanText(filteredWs.Cells(i, cReferalId).value) Else vRefId = ""
         If cAgent > 0 Then vAgent = L2_CleanText(filteredWs.Cells(i, cAgent).value) Else vAgent = ""
         If cAgentId > 0 Then vAgentId = L2_CleanText(filteredWs.Cells(i, cAgentId).value) Else vAgentId = ""
@@ -1013,6 +1226,7 @@ Private Sub L2_Block_API_Load(ByVal filteredWs As Worksheet, ByVal ws As Workshe
                 Else
                     L2_Api_Upd vStat, tType, taD, taW
                 End If
+                L2_ControlMarkRow filteredWs, i, L2C_LoadL2Ids
 
                 If L2_NormalizeText(vDept) = L2_NormalizeText("Buffer") Then
                     If tType = 1 Then
@@ -1070,7 +1284,7 @@ Private Function L2_Api_IsKnownStatus(ByVal statusName As String) As Boolean
 
     Select Case statusName
         Case "New", "Information provided", "Review of stalled request", _
-             "Awaiting response from PS", "In progress (awaiting PS response)", "Individual agreement"
+             "Awaiting response from PS", "In progress (awaiting PS response)", "Approval of compensation"
             L2_Api_IsKnownStatus = True
         Case Else
             L2_Api_IsKnownStatus = False
@@ -1104,8 +1318,8 @@ Private Function L2_Api_NormalizeStatus(ByVal statusName As String) As String
             L2_Api_NormalizeStatus = "Awaiting response from PS"
         Case "In progress (awaiting PS response)", "In progress"
             L2_Api_NormalizeStatus = "In progress (awaiting PS response)"
-        Case "Individual agreement", "Individual approval", "Approval of compensation"
-            L2_Api_NormalizeStatus = "Individual agreement"
+        Case "Approval of compensation"
+            L2_Api_NormalizeStatus = "Approval of compensation"
         Case Else
             L2_Api_NormalizeStatus = statusName
     End Select
@@ -1123,7 +1337,7 @@ Private Sub L2_Api_Upd(ByVal st As String, ByVal tp As Integer, ByRef d() As Lon
         Case "Review of stalled request": idx = 4
         Case "Awaiting response from PS": idx = 5
         Case "In progress (awaiting PS response)": idx = 6
-        Case "Individual agreement": idx = 7
+        Case "Approval of compensation": idx = 7
     End Select
 
     If idx > 0 Then
@@ -1180,7 +1394,7 @@ Private Sub L2_Api_Render(ByVal ws As Worksheet, _
         .Cells(r, 1).value = "In progress (awaiting PS response)" & s2: .Cells(r, 2).value = d(6): r = r + 1
 
         If Not isTeamB Then
-            .Cells(r, 1).value = "Individual agreement": .Cells(r, 2).value = d(7): r = r + 1
+            .Cells(r, 1).value = "Approval of compensation": .Cells(r, 2).value = d(7): r = r + 1
         End If
 
         depLastRow = r - 1
@@ -1206,7 +1420,7 @@ Private Sub L2_Api_Render(ByVal ws As Worksheet, _
         .Cells(r, 1).value = "In progress (awaiting PS response)" & s2: .Cells(r, 2).value = w(6): r = r + 1
 
         If Not isTeamB Then
-            .Cells(r, 1).value = "Individual agreement": .Cells(r, 2).value = w(7): r = r + 1
+            .Cells(r, 1).value = "Approval of compensation": .Cells(r, 2).value = w(7): r = r + 1
         End If
 
         wdLastRow = r - 1
@@ -1495,7 +1709,7 @@ End Sub
 Private Sub L2_Psp_Compute(ByVal filteredWs As Worksheet, ByRef depositLoad() As Long, ByRef withdrawLoad() As Long, ByVal countryAllDict As Object, ByVal country24Dict As Object, ByVal statusDict As Object, ByVal referalDict As Object, ByRef totalCountryAll As Long, ByRef totalCountry24 As Long, ByRef totalReferal As Long)
 
     Dim cTopic As Long, cStatus As Long, cCountry As Long, cPt As Long, cFrom As Long, cRef As Long, cTicketType As Long
-    Dim cDept As Long
+    Dim cDept As Long, cCurrency As Long
     Dim lastRow As Long, i As Long
     Dim topicValue As String, statusDisplay As String, statusValue As String, statusKey As String
     Dim fromValue As String, countryValue As String, referalValue As String, referalBase As String
@@ -1512,6 +1726,7 @@ Private Sub L2_Psp_Compute(ByVal filteredWs As Worksheet, ByRef depositLoad() As
     cRef = L2_GetHeaderCol(filteredWs, "Referal")
     cTicketType = L2_GetHeaderCol(filteredWs, "Ticket type")
     cDept = L2_GetHeaderCol(filteredWs, "Department")
+    cCurrency = L2_GetHeaderCol(filteredWs, "Ticket currency")
 
     If Not countryAllDict Is Nothing Then
 
@@ -1559,7 +1774,11 @@ Private Sub L2_Psp_Compute(ByVal filteredWs As Worksheet, ByRef depositLoad() As
         statusValue = LCase(statusDisplay)
         statusKey = L2_Psp_CanonicalStatusKey(statusValue)
         fromValue = LCase(Trim(L2_CleanText(filteredWs.Cells(i, cFrom).value)))
-        countryValue = L2_Psp_NormalizeCountry(filteredWs.Cells(i, cCountry).value)
+        ' PSP использует только свои пять GEO, не общий список API.
+        countryValue = L2_Psp_NormalizeCountry(L2_WorkCountry( _
+            L2_CleanText(filteredWs.Cells(i, cCountry).value), _
+            L2_CleanText(filteredWs.Cells(i, cCurrency).value), L2_PspGeoListEn()))
+        If countryValue = "" Then GoTo NextRow
 
         processingHours = L2_ToNumber(filteredWs.Cells(i, cPt).value)
         referalValue = LCase(Trim(L2_CleanText(filteredWs.Cells(i, cRef).value)))
@@ -1581,8 +1800,10 @@ Private Sub L2_Psp_Compute(ByVal filteredWs As Worksheet, ByRef depositLoad() As
         If statusIndex > 0 Then
             If topicType = 1 Then
                 depositLoad(statusIndex) = depositLoad(statusIndex) + 1
+                L2_ControlMarkRow filteredWs, i, L2C_LoadL2Ids
             ElseIf topicType = 2 Then
                 withdrawLoad(statusIndex) = withdrawLoad(statusIndex) + 1
+                L2_ControlMarkRow filteredWs, i, L2C_LoadL2Ids
             End If
         End If
 
@@ -1590,10 +1811,12 @@ Private Sub L2_Psp_Compute(ByVal filteredWs As Worksheet, ByRef depositLoad() As
         Select Case topicType
             Case 1
                 L2P_DepositCount = L2P_DepositCount + 1
+                L2_ControlMarkRow filteredWs, i, L2C_EveningIds
                 If fromValue = "user" Then L2P_DepositUser = L2P_DepositUser + 1
                 If fromValue = "ps" Then L2P_DepositPS = L2P_DepositPS + 1
             Case 2
                 L2P_WithdrawCount = L2P_WithdrawCount + 1
+                L2_ControlMarkRow filteredWs, i, L2C_EveningIds
                 If fromValue = "user" Then L2P_WithdrawUser = L2P_WithdrawUser + 1
                 If fromValue = "ps" Then L2P_WithdrawPS = L2P_WithdrawPS + 1
         End Select
@@ -1624,6 +1847,7 @@ Private Sub L2_Psp_Compute(ByVal filteredWs As Worksheet, ByRef depositLoad() As
                     If processingHours >= 24 And statusKey <> "awaiting response from ps" Then
                         country24Dict(countryValue) = country24Dict(countryValue) + 1
                         totalCountry24 = totalCountry24 + 1
+                        L2_ControlMarkRow filteredWs, i, L2C_GeoBtmSmpPspIds
                     End If
                 End If
             End If
@@ -1729,7 +1953,8 @@ End Function
 ' ============================================================
 ' БЛОК №4: BT M / SMP M (порт Общий_мониторинг_BT_M_SMP.txt)
 ' Логика построчного прохода перенесена дословно (статусы, гео-списки,
-' рефералы, часовые пороги, исключение melbet вне Турции). Единственное отличие
+' рефералы, часовые пороги, исключение melbet вне Турции, исключение
+' устаревшие GEO исключены из активного списка BT M). Единственное отличие
 ' от оригинала: раньше макрос сам строил вырезку из "Report", теперь
 ' читает из уже готового общего листа "Фильтрация".
 ' Результат раскладывается по четырём листам вместо одного:
@@ -1877,8 +2102,9 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
 
     Dim i As Long, lastRow As Long
     Dim cProcTime As Long, cFrom As Long, cStatus As Long, cCountry As Long, cDept As Long
-    Dim cAgent As Long, cAgentId As Long, cTicketType As Long, cReferal As Long, cSubagent As Long, cTopic As Long
+    Dim cAgent As Long, cAgentId As Long, cTicketType As Long, cReferal As Long, cReferalId As Long, cCurrency As Long, cSubagent As Long, cTopic As Long
 
+    ' Октябрь 2026: BT M = 34 актуальных GEO в порядке рабочей таблицы.
     L2B_countryEn = Array("Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", "Guatemala", "Honduras", "Djibouti", "Egypt", "Jordan", "Iraq", "Iran", "Yemen", "Canada", "Qatar", "Kuwait", "Kyrgyzstan", "Lebanon", "Libya", "Mauritania", "Morocco", "Nicaragua", "United Arab Emirates", "Oman", "Palestine", "Panama", "Paraguay", "Saudi Arabia", "Syria", "Somalia", "Taiwan", "Tunisia", "Turkey", "South Sudan")
 
     L2B_countryRu = Array("Азербайджан", "Алжир", "Афганистан", "Бахрейн", "Боливия", "Гватемала", "Гондурас", "Джибути", "Египет", "Иордания", "Ирак", "Иран", "Йемен", "Канада", "Катар", "Кувейт", "Кыргызстан", "Ливан", "Ливия", "Мавритания", "Марокко", "Никарагуа", "ОАЭ", "Оман", "Палестина", "Панама", "Парагвай", "Саудовская Аравия", "Сирия", "Сомали", "Тайвань", "Тунис", "Турция", "Южный Судан")
@@ -1892,7 +2118,8 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
 
     L2B_statusList = Array("Received (M)", "Received (Fraud) (M)", "Approved (M)", "Create new transaction (M)", "Credited to another account (M)", "Review required (M)", "Revision needed (M)", "In progress (M)")
 
-    L2B_referalList = Array("webdefault", "1xbet22.com", "melbet", "1xir.com", "1xgames", "bo.1xbet.com", "1xbet.tn", "1xbet.et", "bizbet", "1xcasino", "afropari", "onjabet", "bizbet africa (ar)", "1xbet.pa")
+    ' Порядок строк статистики сохраняется, дополняем только согласованные рефералы.
+    L2B_referalList = Array("webdefault", "1xbet22.com", "melbet", "1xir.com", "1xgames", "bo.1xbet.com", "1xbet.tn", "1xbet.et", "bizbet", "1xcasino", "afropari", "onjabet", "bizbet africa (ar)", "1xbet.pa", "vippari", "in.1xbet.com", "1xbet.latam")
 
     Set L2B_geoTotalBT = L2_NewDictionary()
     Set L2B_geoOver24BT = L2_NewDictionary()
@@ -1914,8 +2141,7 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
     For iC = LBound(L2B_countryEn) To UBound(L2B_countryEn)
         L2B_geoTotalBT.Add L2B_countryEn(iC), 0
         L2B_geoOver24BT.Add L2B_countryEn(iC), 0
-        ' Все GEO из списка, включая перешедшие на SMP, считаются и в BT M,
-        ' если сам тикет имеет Ticket type = BT M.
+        ' Все GEO в октябрьском списке BT M активны и участвуют в подсчёте.
         btActiveCountries.Add L2B_countryEn(iC), True
     Next iC
 
@@ -1941,6 +2167,8 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
     cAgentId = L2_GetHeaderCol(filteredWs, "Agent ID")
     cTicketType = L2_GetHeaderCol(filteredWs, "Ticket type")
     cReferal = L2_GetHeaderCol(filteredWs, "Referal")
+    cReferalId = L2_GetHeaderCol(filteredWs, "Referal ID")
+    cCurrency = L2_GetHeaderCol(filteredWs, "Ticket currency")
     cSubagent = L2_GetHeaderCol(filteredWs, "Subagent")
     cTopic = L2_GetHeaderCol(filteredWs, "Topic")
 
@@ -1948,11 +2176,14 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
 
     Dim topicValue As String, fromValue As String, statusValue As String, statusRaw As String
     Dim countryValue As String, countryRaw As String, departmentValue As String, agentValue As String
-    Dim ticketTypeValue As String, referalValue As String, referalName As String, subagentRaw As String
+    Dim ticketTypeValue As String, referalValue As String, referalIdValue As String, referalName As String, subagentRaw As String
     Dim agentIdValue As String, loadStatus As String, leaderKey As String, posSharp As Long
     Dim hasProcessingTime As Boolean, isBtTicket As Boolean, isSmpTicket As Boolean, ptHours As Double
+    Dim controlStuckHit As Boolean
 
     For i = 2 To lastRow
+
+        controlStuckHit = False
 
         topicValue = L2_NormalizeText(filteredWs.Cells(i, cTopic).value)
         fromValue = L2_NormalizeText(filteredWs.Cells(i, cFrom).value)
@@ -1965,6 +2196,7 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
         agentIdValue = L2_CleanText(filteredWs.Cells(i, cAgentId).value)
         ticketTypeValue = L2_NormalizeText(filteredWs.Cells(i, cTicketType).value)
         referalValue = L2_NormalizeText(filteredWs.Cells(i, cReferal).value)
+        referalIdValue = L2_CleanText(filteredWs.Cells(i, cReferalId).value)
         subagentRaw = L2_CleanText(filteredWs.Cells(i, cSubagent).value)
 
         If ticketTypeValue <> L2_NormalizeText("BT M") And ticketTypeValue <> L2_NormalizeText("SMP M") Then GoTo NextDataRow
@@ -1976,20 +2208,35 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
            Not (ticketTypeValue = L2_NormalizeText("SMP M") And _
                 departmentValue = L2_NormalizeText("Buffer")) Then GoTo NextDataRow
 
+        ' Каждому типу тикета соответствует только ЕГО список стран.
+        ' Если рабочее GEO определить нельзя, исключаем из этого расчёта.
         If ticketTypeValue = L2_NormalizeText("BT M") Then
             If agentIdValue <> "279" Then GoTo NextDataRow
             If Not L2_Btm_IsPreset4BtStatus(statusValue) Then GoTo NextDataRow
+            countryRaw = L2_WorkCountry(countryRaw, _
+                L2_CleanText(filteredWs.Cells(i, cCurrency).value), L2B_countryEn)
+            If countryRaw = "" Then GoTo NextDataRow
             If Not btActiveCountries.Exists(countryRaw) Then GoTo NextDataRow
         ElseIf ticketTypeValue = L2_NormalizeText("SMP M") Then
             If Not L2_Btm_IsPreset4SmpStatus(statusValue) Then GoTo NextDataRow
+            countryRaw = L2_WorkCountry(countryRaw, _
+                L2_CleanText(filteredWs.Cells(i, cCurrency).value), L2B_smpCountryEn)
+            If countryRaw = "" Then GoTo NextDataRow
             If Not L2B_smpGeoTotal.Exists(countryRaw) Then GoTo NextDataRow
         End If
+        countryValue = L2_NormalizeText(countryRaw)
 
         hasProcessingTime = IsNumeric(filteredWs.Cells(i, cProcTime).value)
         If hasProcessingTime Then ptHours = CDbl(filteredWs.Cells(i, cProcTime).value) Else ptHours = 0
 
         posSharp = InStr(1, referalValue, "#", vbTextCompare)
         If posSharp > 0 Then referalName = Trim(Left(referalValue, posSharp - 1)) Else referalName = referalValue
+
+        ' 17 согласованных рефералов относятся ТОЛЬКО к BT M.
+        ' SMP M не фильтруется списком рефералов BT M.
+        If ticketTypeValue = L2_NormalizeText("BT M") Then
+            If Not L2_Btm_AllowedReferal(referalValue, referalIdValue) Then GoTo NextDataRow
+        End If
 
         isBtTicket = (ticketTypeValue = L2_NormalizeText("BT M"))
         isSmpTicket = (ticketTypeValue = L2_NormalizeText("SMP M") And L2B_smpGeoTotal.Exists(countryRaw))
@@ -2019,26 +2266,26 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
 
             If isBtTicket And departmentValue = L2_NormalizeText("MENA 1x") Then
 
-                If statusValue = L2_NormalizeText("Not Received (M)") And ptHours >= 48 Then L2B_m1NotReceived = L2B_m1NotReceived + 1
-                If statusValue = L2_NormalizeText("Sent for processing (M)") And ptHours >= 72 Then L2B_m1Sent72 = L2B_m1Sent72 + 1
-                If statusValue = L2_NormalizeText("New request (M)") And ptHours >= 72 Then L2B_m1New72 = L2B_m1New72 + 1
-                If statusValue = L2_NormalizeText("In progress (M)") And ptHours >= 24 Then L2B_m1InProgress24 = L2B_m1InProgress24 + 1
+                If statusValue = L2_NormalizeText("Not Received (M)") And ptHours >= 48 Then L2B_m1NotReceived = L2B_m1NotReceived + 1: controlStuckHit = True
+                If statusValue = L2_NormalizeText("Sent for processing (M)") And ptHours >= 72 Then L2B_m1Sent72 = L2B_m1Sent72 + 1: controlStuckHit = True
+                If statusValue = L2_NormalizeText("New request (M)") And ptHours >= 72 Then L2B_m1New72 = L2B_m1New72 + 1: controlStuckHit = True
+                If statusValue = L2_NormalizeText("In progress (M)") And ptHours >= 24 Then L2B_m1InProgress24 = L2B_m1InProgress24 + 1: controlStuckHit = True
 
                 If L2_Btm_IsBtPkStatus(statusValue) Then
-                    If ptHours >= 12 Then L2B_m1Pk12 = L2B_m1Pk12 + 1
+                    If ptHours >= 12 Then L2B_m1Pk12 = L2B_m1Pk12 + 1: controlStuckHit = True
                     If ptHours >= 24 Then L2B_m1Pk24 = L2B_m1Pk24 + 1
                     If ptHours >= 48 Then L2B_m1Pk48 = L2B_m1Pk48 + 1
                 End If
 
             ElseIf isBtTicket And departmentValue = L2_NormalizeText("MENA Leads 1x") Then
 
-                If statusValue = L2_NormalizeText("Not Received (M)") And ptHours >= 48 Then L2B_mlNotReceived = L2B_mlNotReceived + 1
-                If statusValue = L2_NormalizeText("Sent for processing (M)") And ptHours >= 72 Then L2B_mlSent72 = L2B_mlSent72 + 1
-                If statusValue = L2_NormalizeText("New request (M)") And ptHours >= 72 Then L2B_mlNew72 = L2B_mlNew72 + 1
-                If statusValue = L2_NormalizeText("In progress (M)") And ptHours >= 24 Then L2B_mlInProgress24 = L2B_mlInProgress24 + 1
+                If statusValue = L2_NormalizeText("Not Received (M)") And ptHours >= 48 Then L2B_mlNotReceived = L2B_mlNotReceived + 1: controlStuckHit = True
+                If statusValue = L2_NormalizeText("Sent for processing (M)") And ptHours >= 72 Then L2B_mlSent72 = L2B_mlSent72 + 1: controlStuckHit = True
+                If statusValue = L2_NormalizeText("New request (M)") And ptHours >= 72 Then L2B_mlNew72 = L2B_mlNew72 + 1: controlStuckHit = True
+                If statusValue = L2_NormalizeText("In progress (M)") And ptHours >= 24 Then L2B_mlInProgress24 = L2B_mlInProgress24 + 1: controlStuckHit = True
 
                 If L2_Btm_IsBtPkStatus(statusValue) Then
-                    If ptHours >= 12 Then L2B_mlPk12 = L2B_mlPk12 + 1
+                    If ptHours >= 12 Then L2B_mlPk12 = L2B_mlPk12 + 1: controlStuckHit = True
                     If ptHours >= 24 Then L2B_mlPk24 = L2B_mlPk24 + 1
                     If ptHours >= 48 Then L2B_mlPk48 = L2B_mlPk48 + 1
                 End If
@@ -2047,18 +2294,20 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
 
             If isSmpTicket And L2_Btm_IsSmpCountry(countryValue) Then
 
-                If statusValue = L2_NormalizeText("Sent for processing") And ptHours >= 72 Then L2B_smpSent72 = L2B_smpSent72 + 1
-                If statusValue = L2_NormalizeText("New request") And ptHours >= 72 Then L2B_smpNew72 = L2B_smpNew72 + 1
-                If L2_Btm_IsSmpInProgress(statusValue) And ptHours >= 24 Then L2B_smpInProgress24 = L2B_smpInProgress24 + 1
+                If statusValue = L2_NormalizeText("Sent for processing") And ptHours >= 72 Then L2B_smpSent72 = L2B_smpSent72 + 1: controlStuckHit = True
+                If statusValue = L2_NormalizeText("New request") And ptHours >= 72 Then L2B_smpNew72 = L2B_smpNew72 + 1: controlStuckHit = True
+                If L2_Btm_IsSmpInProgress(statusValue) And ptHours >= 24 Then L2B_smpInProgress24 = L2B_smpInProgress24 + 1: controlStuckHit = True
 
                 If L2_Btm_IsSmpPtStatus(statusValue) Then
-                    If ptHours >= 12 Then L2B_smpPt12 = L2B_smpPt12 + 1
+                    If ptHours >= 12 Then L2B_smpPt12 = L2B_smpPt12 + 1: controlStuckHit = True
                     If ptHours >= 24 Then L2B_smpPt24 = L2B_smpPt24 + 1
                 End If
 
             End If
 
         End If
+
+        If controlStuckHit Then L2_ControlMarkRow filteredWs, i, L2C_StuckIds
 
         If hasProcessingTime Then
 
@@ -2092,14 +2341,20 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
             If L2B_geoTotalBT.Exists(countryRaw) Then
                 If Not (referalName = L2_NormalizeText("melbet") And countryValue <> L2_NormalizeText("Turkey")) Then
                     L2_IncDictionary L2B_geoTotalBT, countryRaw
-                    If hasProcessingTime And ptHours >= 24 Then L2_IncDictionary L2B_geoOver24BT, countryRaw
+                    If hasProcessingTime And ptHours >= 24 Then
+                        L2_IncDictionary L2B_geoOver24BT, countryRaw
+                        L2_ControlMarkRow filteredWs, i, L2C_GeoBtmSmpPspIds
+                    End If
                 End If
             End If
 
         ElseIf isSmpTicket Then
 
             L2_IncDictionary L2B_smpGeoTotal, countryRaw
-            If hasProcessingTime And ptHours >= 24 Then L2_IncDictionary L2B_smpGeoOver24, countryRaw
+            If hasProcessingTime And ptHours >= 24 Then
+                L2_IncDictionary L2B_smpGeoOver24, countryRaw
+                L2_ControlMarkRow filteredWs, i, L2C_GeoBtmSmpPspIds
+            End If
 
         End If
 
@@ -2121,6 +2376,7 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
 
                     L2_IncDictionary L2B_loadLeadsStatus, loadStatus
                     L2_IncDictionary L2B_loadLeadsGeo, countryRaw
+                    L2_ControlMarkRow filteredWs, i, L2C_LoadL2Ids
 
                     If subagentRaw <> "" Then
                         leaderKey = "Mena Leads 1x" & ChrW(30) & subagentRaw & ChrW(30) & loadStatus
@@ -2131,6 +2387,7 @@ Private Sub L2_Btm_ComputeOnce(ByVal filteredWs As Worksheet)
 
                     L2_IncDictionary L2B_loadM1Status, loadStatus
                     L2_IncDictionary L2B_loadM1Geo, countryRaw
+                    L2_ControlMarkRow filteredWs, i, L2C_LoadL2Ids
 
                     If subagentRaw <> "" Then
                         leaderKey = "Mena 1x" & ChrW(30) & subagentRaw & ChrW(30) & loadStatus
@@ -2193,9 +2450,9 @@ End Function
 Private Function L2_SmpGeoListEn() As Variant
 
     L2_SmpGeoListEn = Array( _
-        "Sudan", "Egypt", "Mauritania", _
-        "Honduras", "Nicaragua", "South Sudan", "Paraguay", _
-        "Qatar", "United Arab Emirates", "Panama", "Canada", "Guatemala" _
+        "Egypt", "Mauritania", "Sudan", "Honduras", _
+        "Nicaragua", "South Sudan", "Paraguay", "Qatar", _
+        "United Arab Emirates", "Panama", "Canada", "Guatemala", "Djibouti" _
     )
 
 End Function
@@ -2203,9 +2460,9 @@ End Function
 Private Function L2_SmpGeoListRu() As Variant
 
     L2_SmpGeoListRu = Array( _
-        "Судан", "Египет", "Мавритания", _
-        "Гондурас", "Никарагуа", "Южный Судан", "Парагвай", _
-        "Катар", "ОАЭ", "Панама", "Канада", "Гватемала" _
+        "Египет", "Мавритания", "Судан", "Гондурас", _
+        "Никарагуа", "Южный Судан", "Парагвай", "Катар", _
+        "ОАЭ", "Панама", "Канада", "Гватемала", "Джибути" _
     )
 
 End Function
@@ -2488,7 +2745,7 @@ Private Sub L2_Block_API_PSP_Stuck(ByVal filteredWs As Worksheet, ByVal ws As Wo
     Dim dictOurPairs As Object, dictPairRu As Object
     Dim orderPairs As Collection
     Dim colProcessingTime As Long, colCountry As Long, colReferal As Long, colStatus As Long
-    Dim colTicketType As Long, colDepartment As Long, colTicketID As Long
+    Dim colTicketType As Long, colDepartment As Long, colTicketID As Long, colCurrency As Long
     Dim lastRow As Long, r As Long
     Dim diffHours As Double
     Dim department As String, ticketType As String, status As String
@@ -2507,6 +2764,7 @@ Private Sub L2_Block_API_PSP_Stuck(ByVal filteredWs As Worksheet, ByVal ws As Wo
 
     colProcessingTime = L2_GetHeaderCol(filteredWs, "Processing time")
     colCountry = L2_GetHeaderCol(filteredWs, "Country")
+    colCurrency = L2_GetHeaderCol(filteredWs, "Ticket currency")
     colReferal = L2_GetHeaderCol(filteredWs, "Referal")
     colStatus = L2_GetHeaderCol(filteredWs, "Status")
     colTicketType = L2_GetHeaderCol(filteredWs, "Ticket type")
@@ -2529,7 +2787,11 @@ Private Sub L2_Block_API_PSP_Stuck(ByVal filteredWs As Worksheet, ByVal ws As Wo
         status = L2_CleanText(filteredWs.Cells(r, colStatus).value)
         If L2_Geo_GetStatusGroup(status) = "" Then GoTo NextR
 
-        country = L2_CleanText(filteredWs.Cells(r, colCountry).value)
+        ' Здесь действует список пресета №09 и его конкретные пары ГЕО+реферал.
+        country = L2_WorkCountry( _
+            L2_CleanText(filteredWs.Cells(r, colCountry).value), _
+            L2_CleanText(filteredWs.Cells(r, colCurrency).value), L2_GeoApiCopyCountries())
+        If country = "" Then GoTo NextR
         referal = L2_Geo_CleanReferal(L2_CleanText(filteredWs.Cells(r, colReferal).value))
         ticketID = L2_CleanText(filteredWs.Cells(r, colTicketID).value)
         If ticketID = "" Then ticketID = "ROW_" & CStr(r)
@@ -2547,6 +2809,7 @@ Private Sub L2_Block_API_PSP_Stuck(ByVal filteredWs As Worksheet, ByVal ws As Wo
 
         If Not dictSeenType.Exists(uniqueTypeKey) Then
             dictSeenType(uniqueTypeKey) = True
+            L2_ControlMarkRow filteredWs, r, L2C_StuckIds
 
             If L2_Geo_Norm(ticketType) = "api" Then
                 L2_Geo_AddTypeStatusCount dictTypeStatus, "API", status, diffHours
@@ -2637,6 +2900,8 @@ End Sub
 ' ---- L2_Block_BTM_PK: "Сводная таблица 12-19" (было "НагрузкаПК_BT_M") ----
 Private Sub L2_Block_BTM_PK(ByVal filteredWs As Worksheet, ByVal ws As Worksheet, ByRef col As Long)
 
+    Dim geoLastRow As Long
+
     L2_Btm_ComputeOnce filteredWs
 
     L2_Pk_PrintBlock ws, col, "Mena 1x", L2B_loadM1Status, L2B_loadM1Geo, L2B_statusList, L2B_countryEn, RGB(189, 215, 238)
@@ -2646,8 +2911,10 @@ Private Sub L2_Block_BTM_PK(ByVal filteredWs As Worksheet, ByVal ws As Worksheet
 
     L2_AddCopyButton ws, "btnL2_PkM1Statuses", ws.Cells(3, col + 1), ws.Range(ws.Cells(6, col + 1), ws.Cells(12, col + 1)).Address(False, False), RGB(31, 78, 121)
     L2_AddCopyButton ws, "btnL2_PkLeadsStatuses", ws.Cells(3, col + 4), ws.Range(ws.Cells(6, col + 4), ws.Cells(12, col + 4)).Address(False, False), RGB(31, 78, 121)
-    L2_AddCopyButton ws, "btnL2_PkM1Geo", ws.Cells(15, col + 1), ws.Range(ws.Cells(16, col + 1), ws.Cells(52, col + 1)).Address(False, False), RGB(31, 78, 121)
-    L2_AddCopyButton ws, "btnL2_PkLeadsGeo", ws.Cells(15, col + 4), ws.Range(ws.Cells(16, col + 4), ws.Cells(52, col + 4)).Address(False, False), RGB(31, 78, 121)
+    geoLastRow = 16 + (UBound(L2B_countryEn) - LBound(L2B_countryEn))
+
+    L2_AddCopyButton ws, "btnL2_PkM1Geo", ws.Cells(15, col + 1), ws.Range(ws.Cells(16, col + 1), ws.Cells(geoLastRow, col + 1)).Address(False, False), RGB(31, 78, 121)
+    L2_AddCopyButton ws, "btnL2_PkLeadsGeo", ws.Cells(15, col + 4), ws.Range(ws.Cells(16, col + 4), ws.Cells(geoLastRow, col + 4)).Address(False, False), RGB(31, 78, 121)
 
     col = col + 7
 
@@ -2800,7 +3067,7 @@ End Sub
 ' БЛОК №5 (новый): BT M, статусы L2/L1, отдельный список гео.
 ' Источник: настройки пресета №5 в тех-листе Confluence.
 ' Департамент Mena 1x / Mena Leads 1x, Агент BankTransferAgent #279,
-' 7 конкретных статусов, 14 гео. Пишет счётчики по статусу и по гео
+' 7 конкретных статусов, 14 актуальных GEO. Пишет счётчики по статусу и по GEO
 ' в "Нагрузка L2".
 ' ============================================================
 
@@ -2809,7 +3076,7 @@ Private Sub L2_Block_BTM_L2L1(ByVal filteredWs As Worksheet, ByVal ws As Workshe
     Dim statusKeys As Variant, displayLabels As Variant, countryList As Variant
     Dim subjectList As Variant
     Dim statDictM1 As Object, statDictLeads As Object
-    Dim cStatus As Long, cDept As Long, cAgentId As Long, cTicketType As Long, cCountry As Long
+    Dim cStatus As Long, cDept As Long, cAgentId As Long, cTicketType As Long, cCountry As Long, cCurrency As Long
     Dim cReferal As Long, cReferalId As Long, cTopic As Long
     Dim i As Long, lastRow As Long
     Dim vStat As String, vDept As String, vAgentId As String, vTicketType As String, vCountry As String
@@ -2850,6 +3117,7 @@ Private Sub L2_Block_BTM_L2L1(ByVal filteredWs As Worksheet, ByVal ws As Workshe
     cAgentId = L2_GetHeaderCol(filteredWs, "Agent ID")
     cTicketType = L2_GetHeaderCol(filteredWs, "Ticket type")
     cCountry = L2_GetHeaderCol(filteredWs, "Country")
+    cCurrency = L2_GetHeaderCol(filteredWs, "Ticket currency")
     cReferal = L2_GetHeaderCol(filteredWs, "Referal")
     cReferalId = L2_GetHeaderCol(filteredWs, "Referal ID")
     cTopic = L2_GetHeaderCol(filteredWs, "Topic")
@@ -2862,8 +3130,10 @@ Private Sub L2_Block_BTM_L2L1(ByVal filteredWs As Worksheet, ByVal ws As Workshe
         vAgentId = L2_CleanText(filteredWs.Cells(i, cAgentId).value)
         If vAgentId <> "279" Then GoTo NextRow
 
-        vCountry = L2_CleanText(filteredWs.Cells(i, cCountry).value)
-        If Not L2_IsInList(vCountry, countryList) Then GoTo NextRow
+        vCountry = L2_WorkCountry( _
+            L2_CleanText(filteredWs.Cells(i, cCountry).value), _
+            L2_CleanText(filteredWs.Cells(i, cCurrency).value), countryList)
+        If vCountry = "" Then GoTo NextRow
 
         vReferal = L2_Geo_CleanReferal(L2_CleanText(filteredWs.Cells(i, cReferal).value))
         If cReferalId > 0 Then vReferalId = L2_CleanText(filteredWs.Cells(i, cReferalId).value) Else vReferalId = ""
@@ -2878,8 +3148,10 @@ Private Sub L2_Block_BTM_L2L1(ByVal filteredWs As Worksheet, ByVal ws As Workshe
         vDept = L2_CleanText(filteredWs.Cells(i, cDept).value)
         If L2_NormalizeText(vDept) = L2_NormalizeText("Mena Leads 1x") Then
             L2_IncDictionary statDictLeads, vStat
+            L2_ControlMarkRow filteredWs, i, L2C_LoadL2Ids
         ElseIf L2_NormalizeText(vDept) = L2_NormalizeText("Mena 1x") Then
             L2_IncDictionary statDictM1, vStat
+            L2_ControlMarkRow filteredWs, i, L2C_LoadL2Ids
         End If
 NextRow:
     Next i
@@ -2931,7 +3203,107 @@ Private Function L2_L5_NormalizeStatus(ByVal txt As String) As String
     End If
 
 End Function
-' 36 ГЕО, которые выставляются в пресете №09.
+
+' ===========================================================================
+' НАСТРОЙКА ВАЛЮТ. Редактировать здесь, если изменился список валют.
+' Слева код из Ticket currency, справа название Country из выгрузки.
+' Список ниже НЕ разрешает страну сам по себе. Страна должна входить
+' в countryList/список ГЕО именно того расчёта, который считает тикет.
+' НЕ устанавливайте неоднозначные валюты USD, EUR, JOD, ILS:
+' они не позволяют надёжно определить одно рабочее ГЕО.
+' ===========================================================================
+Private Function L2_CountryFromCurrency(ByVal currencyCode As String) As String
+    Select Case UCase$(L2_CleanText(currencyCode))
+        Case "AZN": L2_CountryFromCurrency = "Azerbaijan"
+        Case "DZD": L2_CountryFromCurrency = "Algeria"
+        Case "AFN": L2_CountryFromCurrency = "Afghanistan"
+        Case "BHD": L2_CountryFromCurrency = "Bahrain"
+        Case "BOB": L2_CountryFromCurrency = "Bolivia"
+        Case "GTQ": L2_CountryFromCurrency = "Guatemala"
+        Case "HNL": L2_CountryFromCurrency = "Honduras"
+        Case "DJF": L2_CountryFromCurrency = "Djibouti"
+        Case "EGP": L2_CountryFromCurrency = "Egypt"
+        Case "IQD": L2_CountryFromCurrency = "Iraq"
+        Case "IRR": L2_CountryFromCurrency = "Iran"
+        Case "YER": L2_CountryFromCurrency = "Yemen"
+        Case "CAD": L2_CountryFromCurrency = "Canada"
+        Case "QAR": L2_CountryFromCurrency = "Qatar"
+        Case "KWD": L2_CountryFromCurrency = "Kuwait"
+        Case "KGS": L2_CountryFromCurrency = "Kyrgyzstan"
+        Case "LBP": L2_CountryFromCurrency = "Lebanon"
+        Case "LYD": L2_CountryFromCurrency = "Libya"
+        Case "MRU": L2_CountryFromCurrency = "Mauritania"
+        Case "MAD": L2_CountryFromCurrency = "Morocco"
+        Case "NIO": L2_CountryFromCurrency = "Nicaragua"
+        Case "AED": L2_CountryFromCurrency = "United Arab Emirates"
+        Case "OMR": L2_CountryFromCurrency = "Oman"
+        Case "PAB": L2_CountryFromCurrency = "Panama"
+        Case "PYG": L2_CountryFromCurrency = "Paraguay"
+        Case "SAR": L2_CountryFromCurrency = "Saudi Arabia"
+        Case "SYP": L2_CountryFromCurrency = "Syria"
+        Case "SOS": L2_CountryFromCurrency = "Somalia"
+        Case "SDG": L2_CountryFromCurrency = "Sudan"
+        Case "TWD": L2_CountryFromCurrency = "Taiwan"
+        Case "TND": L2_CountryFromCurrency = "Tunisia"
+        Case "TRY": L2_CountryFromCurrency = "Turkey"
+        Case "SSP": L2_CountryFromCurrency = "South Sudan"
+        Case "JMD": L2_CountryFromCurrency = "Jamaica"
+        ' JMD действует только там, где Jamaica разрешена списком блока.
+        ' Любая другая валюта даёт пустой результат.
+    End Select
+End Function
+
+' ===========================================================================
+' ЕДИНАЯ ПРОВЕРКА ГЕО. Её используют блоки с собственным списком стран.
+' Вход: Country, Ticket currency, допустимые ГЕО текущего блока.
+' Выход: рабочая страна из списка или "" (значит, тикет исключить).
+'
+' Примеры для списка API:
+'   Azerbaijan + USD -> Azerbaijan (исходная страна подходит).
+'   Russia + AZN    -> Azerbaijan (подходящая валюта).
+'   Bangladesh + BDT -> "" (неподходящие страна и валюта).
+'   Russia + USD     -> "" (неоднозначная валюта).
+' ===========================================================================
+Private Function L2_WorkCountry(ByVal originalCountry As String, _
+                                ByVal ticketCurrency As String, _
+                                ByVal allowedCountries As Variant) As String
+    Dim fromCountry As String
+    Dim fromCurrency As String
+
+    fromCountry = L2_CleanText(originalCountry)
+    If L2_IsInList(fromCountry, allowedCountries) Then
+        L2_WorkCountry = fromCountry
+        Exit Function
+    End If
+
+    fromCurrency = L2_CountryFromCurrency(ticketCurrency)
+    If fromCurrency <> "" Then
+        If L2_IsInList(fromCurrency, allowedCountries) Then
+            L2_WorkCountry = fromCurrency
+        End If
+    End If
+End Function
+
+' Отдельный, существовавший список PSP (5 ГЕО) вынесен в одно место.
+' При изменении списка PSP также проверьте имена строк результата PSP.
+Private Function L2_PspGeoListEn() As Variant
+    L2_PspGeoListEn = Array("Azerbaijan", "Turkey", "Iran", "Somalia", "Kyrgyzstan")
+End Function
+
+' 17 утверждённых рефералов для ОСНОВНОЙ нагрузки BT M. Не использовать
+' как замену отдельным спискам/рефералам L1, Fraud, L2/L1 и Сводной.
+Private Function L2_Btm_AllowedReferal(ByVal referalName As String, ByVal referalId As String) As Boolean
+    L2_Btm_AllowedReferal = L2_MatchReferal(referalName, referalId, _
+        Array("webDefault|1", "1xbet22.com|7", "Melbet|8", _
+              "1xir.com|36", "1xGames|150", "1xbet.tn|213", _
+              "1xbet.et|232", "1xCasino|292", "Afropari|300", _
+              "Onjabet|305", "BizBet|287", "BizBet Africa (Ar)|365", _
+              "bo.1xbet.com|156", "1xbet.pa|468", "vippari|316", _
+              "in.1xbet.com|71", "1xbet.latam|338"))
+End Function
+
+' 35 разрешённых GEO октября 2026 для пресета №09.
+' Количество и порядок элементов этой функции фиксируются отдельно.
 ' Исходный Зависшие_по_Гео получал выгрузку уже отобранной по этому списку,
 ' поэтому в блок "Не наши гео/рефералы" попадали только комбинации внутри
 ' него. На общей выгрузке отбор повторяем в коде.
@@ -2939,16 +3311,38 @@ Private Function L2_PresetGeo() As Variant
 
     L2_PresetGeo = Array( _
         "Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", _
-        "Guatemala", "Honduras", "Djibouti", "Egypt", _
-        "Jordan", "Iraq", "Iran", "Yemen", "Canada", "Qatar", _
-        "Kuwait", "Lebanon", "Libya", "Mauritania", "Morocco", "Nicaragua", _
-        "United Arab Emirates", "Oman", "Panama", _
-        "Paraguay", "Saudi Arabia", "Syria", "Somalia", "Sudan", "Taiwan", _
-        "Tunisia", "Turkey", "Jamaica", "Kyrgyzstan", "Palestine", "South Sudan")
+        "Guatemala", "Honduras", "Djibouti", "Egypt", "Jordan", "Iraq", _
+        "Iran", "Yemen", "Canada", "Qatar", "Kuwait", "Kyrgyzstan", "Lebanon", "Libya", _
+        "Mauritania", "Morocco", "Nicaragua", "United Arab Emirates", "Oman", "Palestine", _
+        "Panama", "Paraguay", "Saudi Arabia", "Syria", "Somalia", "Sudan", _
+        "Taiwan", "Tunisia", "Turkey", "South Sudan")
 
 End Function
 
-' 16 рефералов, которые выставляются в пресетах №05 и №09.
+
+' ==========================================================================
+' СПИСОК ГЕО ИМЕННО ДЛЯ «ЗТ по ГЕО API» И СВЯЗАННЫХ ЗАВИСШИХ.
+' В основной «Нагрузке L2 / API» по-прежнему только 35 стран.
+' Здесь ещё есть Jamaica, потому что она ПОКА не удалена из таблицы
+' для копирования. Не путать с общим списком L2_PresetGeo!
+' Если в рабочей таблице меняется список строк, синхронизируйте его
+' со списком пар в L2_Geo_FillOurPairs (их порядок задаёт порядок строк).
+' ==========================================================================
+Private Function L2_GeoApiCopyCountries() As Variant
+    Dim standardCountries As Variant
+    Dim result() As String
+    Dim i As Long
+
+    standardCountries = L2_PresetGeo()
+    ReDim result(LBound(standardCountries) To UBound(standardCountries) + 1)
+    For i = LBound(standardCountries) To UBound(standardCountries)
+        result(i) = CStr(standardCountries(i))
+    Next i
+    result(UBound(result)) = "Jamaica"
+    L2_GeoApiCopyCountries = result
+End Function
+
+' 15 актуальных рефералов для пресетов №05 и №09.
 ' Имена без "#номер": сравнение идёт по результату L2_Geo_CleanReferal.
 Private Function L2_PresetReferals() As Variant
 
@@ -2956,21 +3350,21 @@ Private Function L2_PresetReferals() As Variant
         "1xbet.tn", "webDefault", "Onjabet", "BizBet", _
         "1xGames", "1xbet.pa", "BizBet Africa (Ar)", "1xir.com", _
         "melbet", "bo.1xbet.com", "1xbet22.com", "1xCasino", _
-        "1xbet.et", "Afropari", "rolsbet", "vippari" _
+        "1xbet.et", "Afropari", "vippari" _
     )
 
 End Function
 
 ' Рефералы пресета №09 парами "имя|ID". Сверяются оба значения сразу:
-' тёзка с другим номером в отчёт не попадёт. У "rolsbet" и "vippari"
-' номер не подтверждён, для них стоит пустой ID и сверка идёт по имени.
+' тёзка с другим номером в отчёт не попадёт. У "vippari"
+' номер не подтверждён, для него стоит пустой ID и сверка идёт по имени.
 Private Function L2_PresetReferalPairs() As Variant
 
     L2_PresetReferalPairs = Array( _
         "1xbet.tn|213", "webDefault|1", "Onjabet|305", "BizBet|287", _
         "1xGames|150", "1xbet.pa|468", "BizBet Africa (Ar)|365", "1xir.com|36", _
         "melbet|8", "bo.1xbet.com|156", "1xbet22.com|7", "1xCasino|292", _
-        "1xbet.et|232", "Afropari|300", "rolsbet|", "vippari|" _
+        "1xbet.et|232", "Afropari|300", "vippari|" _
     )
 
 End Function
@@ -3174,7 +3568,7 @@ End Function
 
 
 ' ============================================================
-' БЛОК №6: SMP M, конкретные статусы, единые 12 GEO.
+' БЛОК №6: SMP M, конкретные статусы, 13 актуальных GEO октября.
 ' Источник: настройки пресета №6 в тех-листе. Теперь выводится вертикальным
 ' блоком на "Нагрузка L2"; из "Зависшие тикеты" этот блок убран.
 ' ============================================================
@@ -3183,14 +3577,14 @@ Private Sub L2_Block_SMP_Specific(ByVal filteredWs As Worksheet, ByVal ws As Wor
 
     Dim displayLabels As Variant, statusKeys As Variant, countryList As Variant
     Dim statDict As Object
-    Dim cStatus As Long, cTicketType As Long, cCountry As Long, cDept As Long
+    Dim cStatus As Long, cTicketType As Long, cCountry As Long, cDept As Long, cCurrency As Long
     Dim i As Long, lastRow As Long
     Dim vStat As String, vTicketType As String, vCountry As String, vDept As String
     Dim values As Variant
 
     statusKeys = Array("Received", "Received (Fraud)", "Approved", "Create new transaction", "Credited to another account", "Revision needed", "In progress")
     displayLabels = statusKeys
-    ' Единый набор из 12 SMP GEO.
+    ' Единый набор из 13 SMP GEO.
     countryList = L2_SmpGeoListEn()
 
     Set statDict = L2_NewDictionary()
@@ -3199,6 +3593,7 @@ Private Sub L2_Block_SMP_Specific(ByVal filteredWs As Worksheet, ByVal ws As Wor
     cTicketType = L2_GetHeaderCol(filteredWs, "Ticket type")
     cCountry = L2_GetHeaderCol(filteredWs, "Country")
     cDept = L2_GetHeaderCol(filteredWs, "Department")
+    cCurrency = L2_GetHeaderCol(filteredWs, "Ticket currency")
     lastRow = L2_GetLastRow(filteredWs)
 
     For i = 2 To lastRow
@@ -3212,11 +3607,16 @@ Private Sub L2_Block_SMP_Specific(ByVal filteredWs As Worksheet, ByVal ws As Wor
            L2_NormalizeText(vDept) <> L2_NormalizeText("Mena 1x") And _
            L2_NormalizeText(vDept) <> L2_NormalizeText("Buffer") Then GoTo NextRow
 
-        vCountry = L2_CleanText(filteredWs.Cells(i, cCountry).value)
-        If Not L2_IsInList(vCountry, countryList) Then GoTo NextRow
+        vCountry = L2_WorkCountry( _
+            L2_CleanText(filteredWs.Cells(i, cCountry).value), _
+            L2_CleanText(filteredWs.Cells(i, cCurrency).value), countryList)
+        If vCountry = "" Then GoTo NextRow
 
         vStat = L2_Smp6_NormalizeStatus(L2_CleanText(filteredWs.Cells(i, cStatus).value))
-        If vStat <> "" Then L2_IncDictionary statDict, vStat
+        If vStat <> "" Then
+            L2_IncDictionary statDict, vStat
+            L2_ControlMarkRow filteredWs, i, L2C_LoadL2Ids
+        End If
 NextRow:
     Next i
 
@@ -3269,7 +3669,7 @@ End Function
 ' Добавлены явные фильтры Ticket type = "BT M", Agent ID = "279" и
 ' строгий Department (только Mena 1x / Mena Leads 1x, без Buffer) -
 ' в оригинале их обеспечивал сам пресет в тикет-системе.
-' Статус-нормализация, списки статусов и 22 гео перенесены дословно.
+' Статус-нормализация и списки статусов сохранены; GEO обновлены на октябрь (22).
 ' ============================================================
 
 Private Sub L2_Block_L1(ByVal filteredWs As Worksheet, ByVal ws As Worksheet)
@@ -3285,7 +3685,7 @@ Private Sub L2_Block_L1(ByVal filteredWs As Worksheet, ByVal ws As Worksheet)
 
     Dim m1x24 As Long, m1x48 As Long, leads24 As Long, leads48 As Long
     Dim m1Total As Long, leadsTotal As Long
-    Dim cDept As Long, cStatus As Long, cCountry As Long, cPt As Long, cAgentId As Long, cTicketType As Long
+    Dim cDept As Long, cStatus As Long, cCountry As Long, cPt As Long, cAgentId As Long, cTicketType As Long, cCurrency As Long
     Dim i As Long, lastRow As Long
     Dim vDept As String, vStat As String, vCountry As String, vAgentId As String, vTicketType As String
     Dim diffHours As Double, isLeads As Boolean
@@ -3296,6 +3696,7 @@ Private Sub L2_Block_L1(ByVal filteredWs As Worksheet, ByVal ws As Worksheet)
     cPt = L2_GetHeaderCol(filteredWs, "Processing time")
     cAgentId = L2_GetHeaderCol(filteredWs, "Agent ID")
     cTicketType = L2_GetHeaderCol(filteredWs, "Ticket type")
+    cCurrency = L2_GetHeaderCol(filteredWs, "Ticket currency")
     lastRow = L2_GetLastRow(filteredWs)
 
     For i = 2 To lastRow
@@ -3308,11 +3709,14 @@ Private Sub L2_Block_L1(ByVal filteredWs As Worksheet, ByVal ws As Worksheet)
         isLeads = (L2_NormalizeText(vDept) = L2_NormalizeText("Mena Leads 1x"))
         If Not isLeads And L2_NormalizeText(vDept) <> L2_NormalizeText("Mena 1x") Then GoTo NextRow
 
-        vCountry = L2_CleanText(filteredWs.Cells(i, cCountry).value)
-        If Not L2_IsInList(vCountry, countryList) Then GoTo NextRow
+        vCountry = L2_WorkCountry( _
+            L2_CleanText(filteredWs.Cells(i, cCountry).value), _
+            L2_CleanText(filteredWs.Cells(i, cCurrency).value), countryList)
+        If vCountry = "" Then GoTo NextRow
 
         vStat = L2_L1_NormalizeStatus(L2_CleanText(filteredWs.Cells(i, cStatus).value))
         If vStat = "" Then GoTo NextRow
+        L2_ControlMarkRow filteredWs, i, L2C_LoadL1Ids
         diffHours = L2_ToNumber(filteredWs.Cells(i, cPt).value)
 
         If isLeads Then
@@ -3493,7 +3897,7 @@ Private Sub L2_Block_Fraud(ByVal filteredWs As Worksheet, ByVal ws As Worksheet)
     Dim cDept As Long, cStatus As Long, cPt As Long, cAgentId As Long, cTicketType As Long
     Dim i As Long, lastRow As Long
     Dim vDept As String, vStat As String, vAgentId As String, vTicketType As String
-    Dim diffHours As Double, isLeads As Boolean
+    Dim diffHours As Double, isLeads As Boolean, isFraudCounted As Boolean
 
     cDept = L2_GetHeaderCol(filteredWs, "Department")
     cStatus = L2_GetHeaderCol(filteredWs, "External Status")
@@ -3515,8 +3919,14 @@ Private Sub L2_Block_Fraud(ByVal filteredWs As Worksheet, ByVal ws As Worksheet)
 
         vStat = L2_Fraud_NormalizeStatus(L2_CleanText(filteredWs.Cells(i, cStatus).value))
         diffHours = L2_ToNumber(filteredWs.Cells(i, cPt).value)
+        isFraudCounted = False
 
-        If dWaiting.Exists(vStat) Then dWaiting(vStat) = dWaiting(vStat) + 1
+        If dWaiting.Exists(vStat) Then
+            dWaiting(vStat) = dWaiting(vStat) + 1
+            isFraudCounted = True
+        End If
+        If L2_Fraud_IsMainStatus(vStat, statusList) Then isFraudCounted = True
+        If isFraudCounted Then L2_ControlMarkRow filteredWs, i, L2C_FraudIds
 
         If isLeads Then
             If L2_Fraud_IsMainStatus(vStat, statusList) Then
@@ -3688,7 +4098,7 @@ Private Sub L2_Block_GeoApiPsp(ByVal wb As Workbook, ByVal filteredWs As Workshe
     Dim lastRow As Long, r As Long, outRow As Long, notRow As Long, listStartRow As Long, listRow As Long
 
     Dim colProcessingTime As Long, colCountry As Long, colReferal As Long, colReferalId As Long, colStatus As Long
-    Dim colType As Long, colTicketType As Long, colDepartment As Long, colTicketID As Long, colSubagent As Long
+    Dim colType As Long, colTicketType As Long, colDepartment As Long, colTicketID As Long, colSubagent As Long, colCurrency As Long
 
     Dim country As String, countryRu As String, referal As String, referalId As String, status As String
     Dim playerType As String, ticketType As String, department As String, ticketID As String, subagent As String
@@ -3721,6 +4131,7 @@ Private Sub L2_Block_GeoApiPsp(ByVal wb As Workbook, ByVal filteredWs As Workshe
 
     colProcessingTime = L2_GetHeaderCol(filteredWs, "Processing time")
     colCountry = L2_GetHeaderCol(filteredWs, "Country")
+    colCurrency = L2_GetHeaderCol(filteredWs, "Ticket currency")
     colReferal = L2_GetHeaderCol(filteredWs, "Referal")
     colReferalId = L2_GetHeaderCol(filteredWs, "Referal ID")
     colStatus = L2_GetHeaderCol(filteredWs, "Status")
@@ -3747,15 +4158,17 @@ Private Sub L2_Block_GeoApiPsp(ByVal wb As Workbook, ByVal filteredWs As Workshe
         groupName = L2_Geo_GetStatusGroup(status)
         If groupName = "" Then GoTo NextR
 
-        country = L2_CleanText(filteredWs.Cells(r, colCountry).value)
+        country = L2_WorkCountry( _
+            L2_CleanText(filteredWs.Cells(r, colCountry).value), _
+            L2_CleanText(filteredWs.Cells(r, colCurrency).value), L2_GeoApiCopyCountries())
+        If country = "" Then GoTo NextR
         referal = L2_Geo_CleanReferal(L2_CleanText(filteredWs.Cells(r, colReferal).value))
         If colReferalId > 0 Then referalId = L2_CleanText(filteredWs.Cells(r, colReferalId).value) Else referalId = ""
 
-        ' Пресет №09 выгружает 36 ГЕО и 16 рефералов. Раньше этот отбор делала
-        ' выгрузка, поэтому "Итого" и блок "Не наши гео/рефералы" считались
-        ' внутри него. На общей выгрузке повторяем отбор здесь, иначе в отчёт
-        ' попадают чужие страны (Россия, Узбекистан и подобные).
-        If Not L2_IsInList(country, L2_PresetGeo()) Then GoTo NextR
+        ' Этот отчёт использует 36 ГЕО и прежние рефералы.
+        ' Country или подходящая валюта определяют рабочее GEO.
+        ' Прежние пары GEO+реферал по-прежнему обязательны для итогов.
+        If Not L2_IsInList(country, L2_GeoApiCopyCountries()) Then GoTo NextR
         If Not L2_IsPresetReferal(referalId, referal) Then GoTo NextR
 
         countryRu = L2_Geo_CountryToRu(country)
@@ -3771,6 +4184,9 @@ Private Sub L2_Block_GeoApiPsp(ByVal wb As Workbook, ByVal filteredWs As Workshe
         uniqueKey = groupName & "|" & L2_Geo_Norm(ticketType) & "|" & L2_Geo_Norm(country) & "|" & L2_Geo_Norm(referal) & "|" & ticketID
         If dictSeen.Exists(uniqueKey) Then GoTo NextR
         dictSeen(uniqueKey) = True
+        If dictOurPairs.Exists(pairKey) Or L2_Geo_Norm(department) <> L2_Geo_Norm("Buffer") Then
+            L2_ControlMarkRow filteredWs, r, L2C_GeoApiIds
+        End If
 
         If dictOurPairs.Exists(pairKey) Then
             ' Верхние "Итого" и VIP должны совпадать с суммой наших пар,
@@ -4056,7 +4472,6 @@ Private Sub L2_Geo_FillOurPairs(ByRef dictOurPairs As Object, ByRef dictPairRu A
 
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Egypt", "Египет", "1xCasino"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Egypt", "Египет", "1xGames"
-    L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Egypt", "Египет", "RolsBet"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Egypt", "Египет", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Libya", "Ливия", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Algeria", "Алжир", "1xCasino"
@@ -4073,7 +4488,6 @@ Private Sub L2_Geo_FillOurPairs(ByRef dictOurPairs As Object, ByRef dictPairRu A
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Morocco", "Марокко", "Bizbet Africa (Ar)"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Turkey", "Турция", "1xCasino"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Turkey", "Турция", "BizBet"
-    L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Turkey", "Турция", "RolsBet"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Bolivia", "Боливия", "bo.1xbet.com"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Bolivia", "Боливия", "webDefault"
     L2_Geo_AddOurPair dictOurPairs, dictPairRu, orderPairs, "Guatemala", "Гватемала", "webDefault"
@@ -4254,9 +4668,9 @@ Private Function L2_Geo_CountryToRu(ByVal countryEn As String) As String
         Case L2_Geo_Norm("Somalia"): L2_Geo_CountryToRu = "Сомали"
         Case L2_Geo_Norm("Sudan"): L2_Geo_CountryToRu = "Судан"
         Case L2_Geo_Norm("Taiwan"): L2_Geo_CountryToRu = "Тайвань"
+        Case L2_Geo_Norm("Jamaica"): L2_Geo_CountryToRu = "Ямайка"
         Case L2_Geo_Norm("Tunisia"): L2_Geo_CountryToRu = "Тунис"
         Case L2_Geo_Norm("Turkey"): L2_Geo_CountryToRu = "Турция"
-        Case L2_Geo_Norm("Jamaica"): L2_Geo_CountryToRu = "Ямайка"
         Case L2_Geo_Norm("Djibouti"): L2_Geo_CountryToRu = "Джибути"
         Case L2_Geo_Norm("South Sudan"): L2_Geo_CountryToRu = "Южный Судан"
         Case Else: L2_Geo_CountryToRu = countryEn
@@ -4280,72 +4694,32 @@ End Function
 ' статусов и нет ограничения по странам.
 ' ============================================================
 
-Private Sub L2_Summary_ComputeBtm(ByVal filteredWs As Worksheet)
 
-    Dim cTicketType As Long, cAgentId As Long, cDept As Long, cStatus As Long
-    Dim i As Long, lastRow As Long
-    Dim vTicketType As String, vAgentId As String, vDept As String, vStat As String
-
-    L2S_BtM1x = 0
-    L2S_BtML1x = 0
-
-    cTicketType = L2_GetHeaderCol(filteredWs, "Ticket type")
-    cAgentId = L2_GetHeaderCol(filteredWs, "Agent ID")
-    cDept = L2_GetHeaderCol(filteredWs, "Department")
-    cStatus = L2_GetHeaderCol(filteredWs, "External Status")
-
-    If cTicketType = 0 Or cAgentId = 0 Or cDept = 0 Or cStatus = 0 Then Exit Sub
-
-    lastRow = L2_GetLastRow(filteredWs)
-
-    For i = 2 To lastRow
-
-        vTicketType = L2_NormalizeText(filteredWs.Cells(i, cTicketType).value)
-        If vTicketType <> L2_NormalizeText("BT M") Then GoTo NextRow
-
-        vAgentId = L2_CleanText(filteredWs.Cells(i, cAgentId).value)
-        If vAgentId <> "279" Then GoTo NextRow
-
-        vStat = L2_NormalizeText(filteredWs.Cells(i, cStatus).value)
-        If Not L2_Summary_IsBtmSixStatus(vStat) Then GoTo NextRow
-
-        vDept = L2_NormalizeText(filteredWs.Cells(i, cDept).value)
-
-        If vDept = L2_NormalizeText("Mena 1x") Then
-            L2S_BtM1x = L2S_BtM1x + 1
-        ElseIf vDept = L2_NormalizeText("Mena Leads 1x") Then
-            L2S_BtML1x = L2S_BtML1x + 1
-        End If
-
-NextRow:
-    Next i
-
-End Sub
-
-' Шесть основных статусов BT M промежуточного отчёта.
-Private Function L2_Summary_IsBtmSixStatus(ByVal statusValue As String) As Boolean
-
-    Select Case statusValue
-        Case L2_NormalizeText("Approved (M)"), _
-             L2_NormalizeText("Credited to another account (M)"), _
-             L2_NormalizeText("Received (M)"), _
-             L2_NormalizeText("Received (Fraud) (M)"), _
-             L2_NormalizeText("Revision needed (M)"), _
-             L2_NormalizeText("Create new transaction (M)")
-            L2_Summary_IsBtmSixStatus = True
-        Case Else
-            L2_Summary_IsBtmSixStatus = False
-    End Select
-
+' Готовый результат шестистатусного блока BT M с листа "Нагрузка L2".
+' Если потребуется изменить список основных статусов, править только здесь.
+Private Function L2_Btm_SixLoadTotal(ByVal countedStatuses As Object) As Long
+    L2_Btm_SixLoadTotal = _
+        L2_DictValue(countedStatuses, "Received (M)") + _
+        L2_DictValue(countedStatuses, "Received (Fraud) (M)") + _
+        L2_DictValue(countedStatuses, "Approved (M)") + _
+        L2_DictValue(countedStatuses, "Create new transaction (M)") + _
+        L2_DictValue(countedStatuses, "Credited to another account (M)") + _
+        L2_DictValue(countedStatuses, "Revision needed (M)")
 End Function
 
+' Сводная НЕ перебирает тикеты повторно: берёт шесть статусов из Нагрузки L2.
 Private Sub L2_Block_Summary(ByVal filteredWs As Worksheet, ByVal ws As Worksheet)
 
     Dim labels As Variant, values As Variant
     Dim i As Long, r As Long
     Dim firstDataRow As Long, lastDataRow As Long
 
-    L2_Summary_ComputeBtm filteredWs
+    ' Эти словари уже заполнены L2_Btm_ComputeOnce при построении Нагрузки L2.
+    ' Шесть статусов = все строки блока BT M, КРОМЕ In progress (M).
+    ' Таким образом Сводная полностью совпадает с готовыми итогами L2.
+    L2_Btm_ComputeOnce filteredWs
+    L2S_BtM1x = L2_Btm_SixLoadTotal(L2B_loadM1Status)
+    L2S_BtML1x = L2_Btm_SixLoadTotal(L2B_loadLeadsStatus)
 
     labels = Array( _
         "BT M 6 основных статусов (M1x)", _
@@ -4507,3 +4881,4 @@ Private Sub L2_Block_EveningReport(ByVal filteredWs As Worksheet, ByVal ws As Wo
                      RGB(31, 78, 121)
 
 End Sub
+

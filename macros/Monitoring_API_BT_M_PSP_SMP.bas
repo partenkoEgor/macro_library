@@ -104,21 +104,21 @@ Private Sub BuildReport(ByVal srcWs As Worksheet, _
     Select Case reportMode
 
         Case "API"
+            ' Октябрь 2026: 36 актуальных GEO в порядке рабочей таблицы.
             countryList = Array("Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", _
                                 "Guatemala", "Honduras", "Djibouti", "Egypt", "Jordan", "Iraq", _
                                 "Iran", "Yemen", "Canada", "Qatar", "Kuwait", "Kyrgyzstan", "Lebanon", "Libya", _
                                 "Mauritania", "Morocco", "Nicaragua", "United Arab Emirates", "Oman", "Palestine", _
-                                "Panama", "Paraguay", "Saudi Arabia", "Syria", "Somalia", _
-                                "Sudan", "Taiwan", "Tunisia", "Turkey", "South Sudan", "Jamaica")
+                                "Panama", "Paraguay", "Saudi Arabia", "Syria", "Somalia", "Sudan", _
+                                "Taiwan", "Tunisia", "Turkey", "South Sudan", "Jamaica")
 
             refList = Array("webdefault", "1xbet22.com", "melbet", "1xir.com", "1xgames", _
                             "bo.1xbet.com", "1xbet.tn", "1xbet.et", "bizbet", "1xcasino", _
                             "afropari", "onjabet", "bizbet africa (ar)", "1xbet.pa", _
-                            "in.1xbet.com", "rolsbet", "1xbet.latam", "vippari")
+                            "in.1xbet.com", "1xbet.latam", "vippari")
 
         Case "BTM"
-            ' Paraguay остаётся в выводе как техническая позиция, чтобы не
-            ' сдвигать строки в таблице.
+            ' Октябрь 2026: 34 актуальных GEO в порядке рабочей таблицы.
             countryList = Array("Azerbaijan", "Algeria", "Afghanistan", "Bahrain", "Bolivia", _
                                 "Guatemala", "Honduras", "Djibouti", "Egypt", "Jordan", "Iraq", _
                                 "Iran", "Yemen", "Canada", "Qatar", "Kuwait", "Kyrgyzstan", "Lebanon", "Libya", _
@@ -139,8 +139,10 @@ Private Sub BuildReport(ByVal srcWs As Worksheet, _
                             "afropari", "onjabet", "bizbet africa (ar)", "1xbet.pa")
 
         Case "SMP"
+            ' 13.10.2026: Djibouti добавлен в конец SMP (13 GEO); список BT M сохранён.
             countryList = Array("Egypt", "Mauritania", "Sudan", _
-                                "Honduras", "Nicaragua", "South Sudan", "Paraguay", "Qatar", "United Arab Emirates", "Canada", "Panama", "Guatemala")
+                                "Honduras", "Nicaragua", "South Sudan", "Paraguay", "Qatar", _
+                                "United Arab Emirates", "Panama", "Canada", "Guatemala", "Djibouti")
 
             refList = Array("webdefault", "1xbet22.com", "melbet", "1xir.com", "1xgames", _
                             "bo.1xbet.com", "1xbet.tn", "1xbet.et", "bizbet", "1xcasino", _
@@ -210,24 +212,11 @@ Private Sub BuildReport(ByVal srcWs As Worksheet, _
         vCountry = Trim(CStr(srcWs.Cells(i, countryCol).Value))
         vRef = LCase(Trim(CStr(srcWs.Cells(i, referalCol).Value)))
 
-        ' Haiti, Dominican Republic, Costa Rica и Papua New Guinea больше не
-        ' относятся к нам: строки этих GEO исключаются из всех подсчётов.
-        If IsRemovedGeo(vCountry) Then
+        ' Октябрь 2026: во всех четырёх отчётах считаются только GEO,
+        ' которые реально присутствуют в актуальной рабочей таблице.
+        ' Это исключает ушедшие GEO не только из GEO-блока, но и из ИТОГО/рефералов.
+        If Not IsCountryInList(vCountry, countryList) Then
             GoTo NextRow
-        End If
-
-        ' Paraguay перешёл в SMP. В BT M строка сохраняется
-        ' только для совместимости со структурой таблицы.
-        If UCase(reportMode) = "BTM" And LCase(vCountry) = "paraguay" Then
-            GoTo NextRow
-        End If
-
-        ' В BT M и SMP общие итоги, GEO и рефералы считаются
-        ' только по согласованным спискам стран.
-        If UCase(reportMode) = "BTM" Or UCase(reportMode) = "SMP" Then
-            If Not IsCountryInList(vCountry, countryList) Then
-                GoTo NextRow
-            End If
         End If
 
         If InStr(vRef, "#") > 0 Then
@@ -447,7 +436,7 @@ Private Sub FormatReportSheet(ByVal ws As Worksheet, _
     If UCase(reportMode) = "SMP" Then
         ' В SMP между всеми GEO сохраняется пустая строка. Берём
         ' фактическую последнюю строку, чтобы кнопка копировала
-        ' диапазон F3:F25 (12 стран, включая Катар, ОАЭ, Канаду, Панаму и Гватемалу).
+        ' фактический диапазон актуального октябрьского списка GEO.
         geoLastRow = ws.Cells(ws.Rows.Count, geoLabelCol + 1).End(xlUp).Row
     Else
         geoLastRow = 2 + (UBound(countryList) - LBound(countryList) + 1) * geoStep
@@ -683,8 +672,8 @@ Private Sub AddColumnCopyButtons(ByVal ws As Worksheet, _
     If refStep > 2 Then refCopyFirstRow = 4
 
     ' В PSP последняя строка является техническим пустым отступом.
-    ' В SMP geoLastRow указывает на последнюю страну (Гватемала, строка 25),
-    ' диапазон F3:F25 сохраняет пустые строки между всеми GEO.
+    ' В SMP geoLastRow определяется по фактической последней стране,
+    ' поэтому диапазон копирования автоматически сохраняет пустые строки между GEO.
     If geoStep = 2 And UCase(reportMode) <> "SMP" Then geoCopyLastRow = geoCopyLastRow - 1
     If refStep = 2 Then refCopyLastRow = refCopyLastRow - 1
 
@@ -795,9 +784,9 @@ Private Function IsExcludedReferralCountry(ByVal reportMode As String, _
     c = LCase(Trim(countryName))
     mode = UCase(Trim(reportMode))
 
-    If mode = "BTM" And r = "rolsbet" Then
-        IsExcludedReferralCountry = True
-    ElseIf mode = "API" And c = "egypt" And r = "rolsbet" Then
+    ' RolsBet отсутствует в актуальных октябрьских списках API и BT M,
+    ' поэтому его тикеты не должны попадать ни в ИТОГО, ни в детализацию.
+    If (mode = "BTM" Or mode = "API") And r = "rolsbet" Then
         IsExcludedReferralCountry = True
     Else
         IsExcludedReferralCountry = False
@@ -845,19 +834,6 @@ Private Function GetLastDataRow(ByVal ws As Worksheet, ByVal keyCols As Variant)
 End Function
 
 
-' GEO, которые больше не относятся к нам.
-Private Function IsRemovedGeo(ByVal countryName As String) As Boolean
-
-    Select Case LCase(Trim(countryName))
-        Case "haiti", "dominican republic", "costa rica", "papua new guinea"
-            IsRemovedGeo = True
-        Case Else
-            IsRemovedGeo = False
-    End Select
-
-End Function
-
-
 Private Function IsCountryInList(ByVal countryName As String, _
                                  ByVal countryList As Variant) As Boolean
 
@@ -886,9 +862,6 @@ Private Function IsAllowedApiReferral(ByVal refName As String, ByVal countryName
     Select Case r
 
         Case "in.1xbet.com"
-            IsAllowedApiReferral = (c = "turkey")
-
-        Case "rolsbet"
             IsAllowedApiReferral = (c = "turkey")
 
         Case "1xbet.latam"
@@ -1065,6 +1038,8 @@ Private Function GetSmpCountryDisplayName(ByVal countryName As String) As String
             GetSmpCountryDisplayName = "Канада"
         Case "guatemala"
             GetSmpCountryDisplayName = "Гватемала"
+        Case "djibouti"
+            GetSmpCountryDisplayName = "Джибути"
         Case Else
             GetSmpCountryDisplayName = countryName
     End Select

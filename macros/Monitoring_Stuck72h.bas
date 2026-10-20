@@ -1,54 +1,112 @@
 Option Explicit
 
-Sub Monitoring_SFP_SMP_NR72ч()
+' VERSION: 2026-10-13
+' SMP: 13 GEO; Ticket type = SMP M; Agent / Agent ID не ограничивают подсчёт.
+' SMP Department: Mena 1x, Mena Leads 1x, Buffer. Порог: >= 72 часов.
 
-    Dim wsSource As Worksheet
-    Dim wsFiltered As Worksheet
-    Dim sheetNames As Variant
-    Dim i As Long
-    
-    sheetNames = Array("Filtered", _
-                       "SFP (M) 72h+", _
-                       "New request (M) 72h+", _
-                       "SMP SFP 72h+", _
-                       "SMP NR 72h+", _
-                       "SMP подсчет 72h+", _
-                       "Для копирования")
-    
-    For i = LBound(sheetNames) To UBound(sheetNames)
-        If ActiveSheet.Name = CStr(sheetNames(i)) Then
+Sub Monitoring_Зависшие_72ч()
+
+    Dim wb As Workbook
+    Dim wsSource As Worksheet, wsFiltered As Worksheet, wsResult As Worksheet
+    Dim wsBtSfp As Worksheet, wsBtNr As Worksheet
+    Dim wsSmpSfp As Worksheet, wsSmpNr As Worksheet
+    Dim sheetNames As Variant, sheetName As Variant
+    Dim oldScreenUpdating As Boolean, oldDisplayAlerts As Boolean
+    Dim appStateCaptured As Boolean
+    Dim savedError As String
+
+    Set wsSource = ActiveSheet
+    Set wb = wsSource.Parent
+
+    sheetNames = Array("Filtered", "SFP (M) 72h+", "New request (M) 72h+", _
+                       "SMP SFP 72h+", "SMP NR 72h+", "SMP подсчет 72h+", _
+                       "Для копирования", "Зависшие 72ч+")
+
+    For Each sheetName In sheetNames
+        If wsSource.Name = CStr(sheetName) Then
             MsgBox "Запусти макрос с исходного листа выгрузки, а не с итогового листа.", vbExclamation
             Exit Sub
         End If
-    Next i
-    
-    Set wsSource = ActiveSheet
-    
+    Next sheetName
+
+    ' Проверяем новые обязательные поля до удаления итоговых листов.
+    If GetHeaderCol(wsSource, "Ticket type") = 0 Or GetHeaderCol(wsSource, "Department") = 0 Then
+        MsgBox "В исходной выгрузке не найдены обязательные колонки Ticket type или Department. Итоговые листы не изменены.", vbCritical
+        Exit Sub
+    End If
+
+    On Error GoTo ErrorHandler
+
+    oldScreenUpdating = Application.ScreenUpdating
+    oldDisplayAlerts = Application.DisplayAlerts
+    appStateCaptured = True
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
-    
-    On Error Resume Next
-    For i = LBound(sheetNames) To UBound(sheetNames)
-        Worksheets(CStr(sheetNames(i))).Delete
-    Next i
-    On Error GoTo 0
-    
-    Application.DisplayAlerts = True
-    
+
+    ' Удаляются только итоговые листы, которыми управлял этот макрос.
+    For Each sheetName In sheetNames
+        DeleteOwnedSheet wb, CStr(sheetName)
+    Next sheetName
+
     Set wsFiltered = CreateFilteredSheet(wsSource, "Filtered")
-    
+
     CreateBTStatusSheet wsFiltered, "SFP (M) 72h+", "Sent for processing (M)", 72
+    Set wsBtSfp = wb.Worksheets("SFP (M) 72h+")
     CreateBTStatusSheet wsFiltered, "New request (M) 72h+", "New request (M)", 72
-    
+    Set wsBtNr = wb.Worksheets("New request (M) 72h+")
+
     CreateSMPStatusSheet wsFiltered, "SMP SFP 72h+", "Sent for processing", 72
+    Set wsSmpSfp = wb.Worksheets("SMP SFP 72h+")
     CreateSMPStatusSheet wsFiltered, "SMP NR 72h+", "New request", 72
-    
-    CreateSMPSummarySheet wsFiltered, "SMP подсчет 72h+", 72
+    Set wsSmpNr = wb.Worksheets("SMP NR 72h+")
+
     CreateCopySheet
-    
-    Application.ScreenUpdating = True
-    
-    MsgBox "Готово! Макрос отработал: данные отфильтрованы, 72h+ посчитаны, лист для копирования создан.", vbInformation
+    Set wsResult = wb.Worksheets("Зависшие 72ч+")
+
+    ' Временные листы нужны только для подготовки четырёх итоговых блоков.
+    wsBtSfp.Delete
+    Set wsBtSfp = Nothing
+    wsBtNr.Delete
+    Set wsBtNr = Nothing
+    wsSmpSfp.Delete
+    Set wsSmpSfp = Nothing
+    wsSmpNr.Delete
+    Set wsSmpNr = Nothing
+    wsFiltered.Delete
+    Set wsFiltered = Nothing
+
+    wsResult.Activate
+    Application.DisplayAlerts = oldDisplayAlerts
+    Application.ScreenUpdating = oldScreenUpdating
+
+    MsgBox "Готово! Создан лист «Зависшие 72ч+» с четырьмя блоками BT M и SMP M.", vbInformation
+    Exit Sub
+
+ErrorHandler:
+    savedError = Err.Description
+    On Error Resume Next
+    If appStateCaptured Then Application.DisplayAlerts = False
+    If Not wsBtSfp Is Nothing Then wsBtSfp.Delete
+    If Not wsBtNr Is Nothing Then wsBtNr.Delete
+    If Not wsSmpSfp Is Nothing Then wsSmpSfp.Delete
+    If Not wsSmpNr Is Nothing Then wsSmpNr.Delete
+    If Not wsFiltered Is Nothing Then wsFiltered.Delete
+    If appStateCaptured Then
+        Application.DisplayAlerts = oldDisplayAlerts
+        Application.ScreenUpdating = oldScreenUpdating
+    End If
+    On Error GoTo 0
+    MsgBox "Не удалось сформировать отчёт: " & savedError, vbCritical
+
+End Sub
+
+Private Sub DeleteOwnedSheet(ByVal wb As Workbook, ByVal sheetName As String)
+
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = wb.Worksheets(sheetName)
+    On Error GoTo 0
+    If Not ws Is Nothing Then ws.Delete
 
 End Sub
 
@@ -185,6 +243,7 @@ Private Sub CreateBTStatusSheet(ByVal wsFiltered As Worksheet, _
     Dim subagentCol As Long
     Dim statusCol As Long
     Dim procTimeCol As Long
+    Dim ticketTypeCol As Long
     
     Dim currentStatus As String
     Dim currentTime As Variant
@@ -194,8 +253,9 @@ Private Sub CreateBTStatusSheet(ByVal wsFiltered As Worksheet, _
     subagentCol = GetHeaderCol(wsFiltered, "Subagent")
     statusCol = GetHeaderCol(wsFiltered, "External Status")
     procTimeCol = GetHeaderCol(wsFiltered, "Processing time")
+    ticketTypeCol = GetHeaderCol(wsFiltered, "Ticket type")
     
-    If countryCol = 0 Or ticketCol = 0 Or subagentCol = 0 Or statusCol = 0 Or procTimeCol = 0 Then
+    If countryCol = 0 Or ticketCol = 0 Or subagentCol = 0 Or statusCol = 0 Or procTimeCol = 0 Or ticketTypeCol = 0 Then
         MsgBox "Не найдены обязательные колонки для листа: " & resultSheetName, vbCritical
         Exit Sub
     End If
@@ -210,6 +270,8 @@ Private Sub CreateBTStatusSheet(ByVal wsFiltered As Worksheet, _
     
     For sourceRow = 2 To lastRow
         
+        If NormalizeText(wsFiltered.Cells(sourceRow, ticketTypeCol).Value) <> NormalizeText("BT M") Then GoTo NextBTStatusRow
+
         currentStatus = NormalizeText(wsFiltered.Cells(sourceRow, statusCol).Value)
         currentTime = wsFiltered.Cells(sourceRow, procTimeCol).Value
         
@@ -224,6 +286,7 @@ Private Sub CreateBTStatusSheet(ByVal wsFiltered As Worksheet, _
             End If
         End If
         
+NextBTStatusRow:
     Next sourceRow
     
     FormatResultSheet wsTarget
@@ -245,13 +308,15 @@ Private Sub CreateSMPStatusSheet(ByVal wsFiltered As Worksheet, _
     Dim subagentCol As Long
     Dim statusCol As Long
     Dim procTimeCol As Long
-    Dim agentIdCol As Long
+    Dim ticketTypeCol As Long
+    Dim departmentCol As Long
     Dim referalCol As Long
     
     Dim currentStatus As String
     Dim currentTime As Variant
     Dim currentCountry As String
-    Dim currentAgentID As String
+    Dim currentTicketType As String
+    Dim currentDepartment As String
     Dim currentReferal As String
     
     countryCol = GetHeaderCol(wsFiltered, "Country")
@@ -259,11 +324,12 @@ Private Sub CreateSMPStatusSheet(ByVal wsFiltered As Worksheet, _
     subagentCol = GetHeaderCol(wsFiltered, "Subagent")
     statusCol = GetHeaderCol(wsFiltered, "External Status")
     procTimeCol = GetHeaderCol(wsFiltered, "Processing time")
-    agentIdCol = GetHeaderCol(wsFiltered, "Agent ID")
+    ticketTypeCol = GetHeaderCol(wsFiltered, "Ticket type")
+    departmentCol = GetHeaderCol(wsFiltered, "Department")
     referalCol = GetHeaderCol(wsFiltered, "Referal")
     
-    If countryCol = 0 Or ticketCol = 0 Or subagentCol = 0 Or statusCol = 0 Or procTimeCol = 0 Or agentIdCol = 0 Or referalCol = 0 Then
-        MsgBox "Не найдены обязательные колонки для SMP: Country, Ticket ID, Subagent, External Status, Processing time, Agent ID или Referal.", vbCritical
+    If countryCol = 0 Or ticketCol = 0 Or subagentCol = 0 Or statusCol = 0 Or procTimeCol = 0 Or ticketTypeCol = 0 Or departmentCol = 0 Or referalCol = 0 Then
+        MsgBox "Не найдены обязательные колонки для SMP: Country, Ticket ID, Subagent, External Status, Processing time, Ticket type, Department или Referal.", vbCritical
         Exit Sub
     End If
     
@@ -279,11 +345,14 @@ Private Sub CreateSMPStatusSheet(ByVal wsFiltered As Worksheet, _
         
         currentCountry = CStr(wsFiltered.Cells(sourceRow, countryCol).Value)
         currentStatus = NormalizeText(wsFiltered.Cells(sourceRow, statusCol).Value)
-        currentAgentID = NormalizeText(wsFiltered.Cells(sourceRow, agentIdCol).Value)
+        currentTicketType = NormalizeText(wsFiltered.Cells(sourceRow, ticketTypeCol).Value)
+        currentDepartment = NormalizeText(wsFiltered.Cells(sourceRow, departmentCol).Value)
         currentReferal = NormalizeText(wsFiltered.Cells(sourceRow, referalCol).Value)
         currentTime = wsFiltered.Cells(sourceRow, procTimeCol).Value
         
-        If IsSMPAgentID(currentAgentID) Then
+        If Not IsAllowedSMPDepartment(currentDepartment) Then GoTo NextSMPRow
+
+        If IsSMPTicket(currentTicketType) Then
             If IsSMPCountry(currentCountry) Then
                 If IsAllowedReferal(currentReferal) Then
                     If currentStatus = NormalizeText(statusFilter) Then
@@ -300,92 +369,10 @@ Private Sub CreateSMPStatusSheet(ByVal wsFiltered As Worksheet, _
             End If
         End If
         
+NextSMPRow:
     Next sourceRow
     
     FormatResultSheet wsTarget
-
-End Sub
-
-Private Sub CreateSMPSummarySheet(ByVal wsFiltered As Worksheet, _
-                                  ByVal resultSheetName As String, _
-                                  ByVal minHours As Double)
-
-    Dim wsTarget As Worksheet
-    Dim lastRow As Long
-    Dim sourceRow As Long
-    
-    Dim countryCol As Long
-    Dim statusCol As Long
-    Dim procTimeCol As Long
-    Dim agentIdCol As Long
-    Dim referalCol As Long
-    
-    Dim currentCountry As String
-    Dim currentStatus As String
-    Dim currentAgentID As String
-    Dim currentReferal As String
-    Dim currentTime As Variant
-    
-    Dim countSFP As Long
-    Dim countNR As Long
-    
-    countryCol = GetHeaderCol(wsFiltered, "Country")
-    statusCol = GetHeaderCol(wsFiltered, "External Status")
-    procTimeCol = GetHeaderCol(wsFiltered, "Processing time")
-    agentIdCol = GetHeaderCol(wsFiltered, "Agent ID")
-    referalCol = GetHeaderCol(wsFiltered, "Referal")
-    
-    If countryCol = 0 Or statusCol = 0 Or procTimeCol = 0 Or agentIdCol = 0 Or referalCol = 0 Then
-        MsgBox "Не найдены обязательные колонки для листа SMP подсчет 72h+.", vbCritical
-        Exit Sub
-    End If
-    
-    lastRow = GetLastRow(wsFiltered)
-    
-    For sourceRow = 2 To lastRow
-        
-        currentCountry = CStr(wsFiltered.Cells(sourceRow, countryCol).Value)
-        currentStatus = NormalizeText(wsFiltered.Cells(sourceRow, statusCol).Value)
-        currentAgentID = NormalizeText(wsFiltered.Cells(sourceRow, agentIdCol).Value)
-        currentReferal = NormalizeText(wsFiltered.Cells(sourceRow, referalCol).Value)
-        currentTime = wsFiltered.Cells(sourceRow, procTimeCol).Value
-        
-        If IsSMPAgentID(currentAgentID) Then
-            If IsSMPCountry(currentCountry) Then
-                If IsAllowedReferal(currentReferal) Then
-                    If IsNumeric(currentTime) Then
-                        If CDbl(currentTime) >= minHours Then
-                            If currentStatus = NormalizeText("Sent for processing") Then
-                                countSFP = countSFP + 1
-                            ElseIf currentStatus = NormalizeText("New request") Then
-                                countNR = countNR + 1
-                            End If
-                        End If
-                    End If
-                End If
-            End If
-        End If
-        
-    Next sourceRow
-    
-    Set wsTarget = Worksheets.Add(After:=Worksheets(Worksheets.Count))
-    wsTarget.Name = resultSheetName
-    
-    wsTarget.Cells(1, 1).Value = "Показатель"
-    wsTarget.Cells(1, 2).Value = "Количество"
-    
-    wsTarget.Cells(2, 1).Value = "SMP Sent for processing 72h+"
-    wsTarget.Cells(2, 2).Value = countSFP
-    
-    wsTarget.Cells(3, 1).Value = "SMP New request 72h+"
-    wsTarget.Cells(3, 2).Value = countNR
-    
-    wsTarget.Cells(4, 1).Value = "SMP Total 72h+"
-    wsTarget.Cells(4, 2).Value = countSFP + countNR
-    
-    wsTarget.Rows(1).Font.Bold = True
-    wsTarget.Cells.WrapText = False
-    wsTarget.Columns.AutoFit
 
 End Sub
 
@@ -395,7 +382,7 @@ Private Sub CreateCopySheet()
     Dim nextRow As Long
     
     Set wsCopy = Worksheets.Add(After:=Worksheets(Worksheets.Count))
-    wsCopy.Name = "Для копирования"
+    wsCopy.Name = "Зависшие 72ч+"
     
     nextRow = 1
     
@@ -466,26 +453,48 @@ Private Sub FormatResultSheet(ByVal ws As Worksheet)
 
 End Sub
 
-Private Function IsSMPAgentID(ByVal value As Variant) As Boolean
+Private Function IsSMPTicket(ByVal value As Variant) As Boolean
 
-    IsSMPAgentID = (NormalizeText(value) = "1014")
+    IsSMPTicket = (NormalizeText(value) = NormalizeText("SMP M"))
+
+End Function
+
+Private Function IsAllowedSMPDepartment(ByVal value As Variant) As Boolean
+
+    Select Case NormalizeText(value)
+        Case NormalizeText("Mena 1x"), NormalizeText("Mena Leads 1x"), NormalizeText("Buffer")
+            IsAllowedSMPDepartment = True
+        Case Else
+            IsAllowedSMPDepartment = False
+    End Select
 
 End Function
 
 Private Function IsSMPCountry(ByVal value As Variant) As Boolean
 
-    Dim s As String
+    Dim countriesEn As Variant, countriesRu As Variant
+    Dim s As String, i As Long
+
+    countriesEn = Array( _
+        "Egypt", "Mauritania", "Sudan", "Honduras", _
+        "Nicaragua", "South Sudan", "Paraguay", "Qatar", _
+        "United Arab Emirates", "Panama", "Canada", "Guatemala", "Djibouti" _
+    )
+    countriesRu = Array( _
+        "Египет", "Мавритания", "Судан", "Гондурас", _
+        "Никарагуа", "Южный Судан", "Парагвай", "Катар", _
+        "ОАЭ", "Панама", "Канада", "Гватемала", "Джибути" _
+    )
+
     s = NormalizeText(value)
-    
+    For i = LBound(countriesEn) To UBound(countriesEn)
+        If s = NormalizeText(countriesEn(i)) Or s = NormalizeText(countriesRu(i)) Then
+            IsSMPCountry = True
+            Exit Function
+        End If
+    Next i
+
     IsSMPCountry = False
-    
-    If s = NormalizeText("Egypt") Then IsSMPCountry = True
-    If s = NormalizeText("Mauritania") Then IsSMPCountry = True
-    If s = NormalizeText("Sudan") Then IsSMPCountry = True
-    
-    If s = NormalizeText("Египет") Then IsSMPCountry = True
-    If s = NormalizeText("Мавритания") Then IsSMPCountry = True
-    If s = NormalizeText("Судан") Then IsSMPCountry = True
 
 End Function
 
